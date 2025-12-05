@@ -1,6 +1,5 @@
 name: Release Builder
 
-# 触发条件：当推送以 'v' 开头的 tag 时 (例如 v1.0.0, v0.1.2)
 on:
   push:
     tags:
@@ -21,7 +20,9 @@ jobs:
             platform: windows/amd64
             artifact_name: serial-mate.exe
             asset_name: serial-mate-windows-amd64.exe
-          - os: ubuntu-latest
+          # 为了更好的兼容性(让构建出的程序能在旧Linux上运行)，
+          # 建议 Linux 使用 ubuntu-22.04 而不是 latest
+          - os: ubuntu-22.04
             platform: linux/amd64
             artifact_name: serial-mate
             asset_name: serial-mate-linux-amd64
@@ -34,56 +35,56 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # 1. 设置 Go 环境
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.21' # 根据你的 go.mod 版本调整
+          go-version: '1.21'
           check-latest: true
 
-      # 2. 设置 Node.js 环境
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
 
-      # 3. 安装 Wails CLI
       - name: Install Wails
         run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
 
-      # 4. Linux 特有依赖 (编译 Wails 必须)
+      # Linux 依赖安装步骤 (已修复包名)
       - name: Install Linux Dependencies
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'ubuntu-22.04'
         run: |
           sudo apt-get update
+          # 注意：Ubuntu 22.04 依然使用 4.0，兼容性更好
+          # 如果你一定要用 ubuntu-latest (24.04)，请改为 libwebkit2gtk-4.1-dev
           sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.0-dev
 
-      # 5. 执行构建
+      # 执行构建 (已修复：移除了 -buildmode production，增加了 -clean)
       - name: Build Application
         run: |
-          wails build -platform ${{ matrix.platform }} -buildmode production
+          wails build -platform ${{ matrix.platform }} -clean
 
-      # 6. 处理构建产物 (重命名以便上传)
+      # 处理 Windows 产物
       - name: Prepare Windows Asset
         if: matrix.os == 'windows-latest'
         run: |
           cd build/bin
           mv ${{ matrix.artifact_name }} ../../${{ matrix.asset_name }}
 
+      # 处理 Linux 产物
       - name: Prepare Linux Asset
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'ubuntu-22.04'
         run: |
           cd build/bin
           mv ${{ matrix.artifact_name }} ../../${{ matrix.asset_name }}
 
-      # macOS 需要打包 .app 为 zip，否则无法直接上传文件夹
+      # 处理 macOS 产物 (打包 .app)
       - name: Prepare macOS Asset
         if: matrix.os == 'macos-latest'
         run: |
           cd build/bin
           zip -r ../../${{ matrix.asset_name }} ${{ matrix.artifact_name }}
 
-      # 7. 上传并发布 Release
+      # 上传 Release
       - name: Create Release and Upload Assets
         uses: softprops/action-gh-release@v1
         if: startsWith(github.ref, 'refs/tags/')
