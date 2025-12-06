@@ -11,6 +11,8 @@ const isConnected = ref(false);
 
 // 模式选择
 const mode = ref<'SERIAL' | 'TCP_CLIENT' | 'TCP_SERVER' | 'UDP'>('SERIAL');
+// 震动动画状态
+const isShaking = ref(false);
 
 // Serial 参数
 const baudRate = ref(115200);
@@ -28,9 +30,31 @@ const udpLocalPort = ref('8081');
 const receivedData = ref<string>('');
 const rawDataBuffer = ref<number[]>([]);
 const sendInput = ref('');
-const showHex = ref(true);
-// 新增：控制是否追加换行符
-const appendNewline = ref(false);
+// 修改 1: 默认关闭 Hex 显示
+const showHex = ref(false);
+
+// 修改 2: 添加 Hex 发送状态
+const hexSend = ref(false);
+
+// 行尾符配置
+const lineEndingMode = ref<'NONE' | 'LF' | 'CRLF'>('NONE');
+const showEolDropdown = ref(false);
+
+const eolOptions = [
+  { label: 'None', value: 'NONE' },
+  { label: '\\n (LF)', value: 'LF' },
+  { label: '\\r\\n (CRLF)', value: 'CRLF' }
+];
+
+const currentEolLabel = computed(() =>
+    eolOptions.find(o => o.value === lineEndingMode.value)?.label || 'None'
+);
+
+const selectEol = (val: 'NONE' | 'LF' | 'CRLF') => {
+  lineEndingMode.value = val;
+  showEolDropdown.value = false;
+};
+
 const autoScroll = ref(true);
 const logWindowRef = ref<HTMLElement | null>(null);
 const rxCount = ref(0);
@@ -68,7 +92,6 @@ onMounted(async () => {
     }
 
     if (bytes && bytes.length > 0) {
-      // [调试] 如果能在浏览器控制台看到这行，说明数据肯定到了前端
       console.log(`RX: ${bytes.length} bytes`, bytes);
 
       rawDataBuffer.value.push(...bytes);
@@ -104,6 +127,19 @@ const refreshPorts = async () => {
   } catch (e) { console.error(e); }
 };
 
+// 安全切换模式
+const switchMode = (targetMode: typeof mode.value) => {
+  if (isConnected.value) {
+    // 如果已连接，触发震动动画
+    isShaking.value = true;
+    setTimeout(() => {
+      isShaking.value = false;
+    }, 500); // 动画持续时间
+    return;
+  }
+  mode.value = targetMode;
+};
+
 const toggleConnection = async () => {
   if (isConnected.value) {
     await CloseConnection();
@@ -135,17 +171,45 @@ const toggleConnection = async () => {
 const handleSend = async () => {
   if (!sendInput.value) return;
 
-  // [修改] 根据复选框决定是否添加换行符
-  let dataToSend = sendInput.value;
-  if (appendNewline.value) {
-    dataToSend += "\n";
+  let dataToSend = "";
+
+  // 修改 2: Hex 发送逻辑
+  if (hexSend.value) {
+    // 1. 移除所有空白字符 (空格、换行等)
+    const cleanInput = sendInput.value.replace(/\s+/g, '');
+
+    // 2. 校验是否为合法 Hex 字符串
+    if (!/^[0-9A-Fa-f]*$/.test(cleanInput)) {
+      alert("Hex 格式错误: 包含非法字符");
+      return;
+    }
+    if (cleanInput.length % 2 !== 0) {
+      alert("Hex 格式错误: 长度必须为偶数 (例如: AA BB)");
+      return;
+    }
+
+    // 3. 转换为原始字节字符串 (Go 后端会将 string 转为 []byte)
+    for (let i = 0; i < cleanInput.length; i += 2) {
+      const hexPair = cleanInput.substring(i, i + 2);
+      const byteVal = parseInt(hexPair, 16);
+      dataToSend += String.fromCharCode(byteVal);
+    }
+  } else {
+    // 普通文本发送逻辑
+    dataToSend = sendInput.value;
+    if (lineEndingMode.value === 'LF') {
+      dataToSend += "\n";
+    } else if (lineEndingMode.value === 'CRLF') {
+      dataToSend += "\r\n";
+    }
   }
 
   const res = await SendData(dataToSend);
 
   if(res === 'Sent') {
+    // 统计发送字节数 (如果是 Hex 发送，按解析后的字节数统计；文本按字符长度简单统计)
+    // 注意：JS string.length 对于多字节字符可能不准确，严谨应该用 TextEncoder，这里简单处理
     txCount.value += dataToSend.length;
-    // 发送成功后保留输入框内容，方便重复发送
   } else {
     alert("发送失败: " + res);
   }
@@ -162,7 +226,6 @@ const formatData = (bytes: number[], isHex: boolean): string => {
   if (isHex) {
     return bytes.map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ') + ' ';
   } else {
-    // 使用 stream: true 可以处理被截断的 UTF-8 字符
     return decoder.decode(new Uint8Array(bytes), { stream: true });
   }
 };
@@ -193,48 +256,51 @@ const scrollToBottom = () => {
 
       <!-- 主题面板 -->
       <div v-if="showThemePanel" class="absolute top-14 left-0 w-full bg-white/90 backdrop-blur-md p-4 shadow-lg border-b border-black/5 z-20 space-y-3">
-        <!-- 省略具体的颜色选择器代码以保持简洁，逻辑与之前相同 -->
         <div class="flex justify-between items-center text-xs font-bold text-[var(--text-sub)]">
           <span>自定义配色</span> <button @click="resetTheme">重置</button>
         </div>
-        <!-- ... 颜色选择器 ... -->
       </div>
 
       <div class="flex-1 overflow-y-auto p-5 space-y-5 custom-scrollbar">
         <!-- 模式切换 -->
-        <div class="bg-white/40 p-1 rounded-lg shadow-sm border border-black/5 flex text-[10px] font-bold">
-          <button @click="mode='SERIAL'" :class="{'bg-white text-[var(--col-primary)] shadow-sm': mode==='SERIAL', 'text-[var(--text-sub)]': mode!=='SERIAL'}" class="flex-1 py-1.5 rounded transition-all" :disabled="isConnected">SERIAL</button>
-          <button @click="mode='TCP_CLIENT'" :class="{'bg-white text-[var(--col-primary)] shadow-sm': mode==='TCP_CLIENT', 'text-[var(--text-sub)]': mode!=='TCP_CLIENT'}" class="flex-1 py-1.5 rounded transition-all" :disabled="isConnected">TCP-C</button>
-          <button @click="mode='TCP_SERVER'" :class="{'bg-white text-[var(--col-primary)] shadow-sm': mode==='TCP_SERVER', 'text-[var(--text-sub)]': mode!=='TCP_SERVER'}" class="flex-1 py-1.5 rounded transition-all" :disabled="isConnected">TCP-S</button>
-          <button @click="mode='UDP'" :class="{'bg-white text-[var(--col-primary)] shadow-sm': mode==='UDP', 'text-[var(--text-sub)]': mode!=='UDP'}" class="flex-1 py-1.5 rounded transition-all" :disabled="isConnected">UDP</button>
+        <div class="bg-white/40 p-1 rounded-lg shadow-sm border border-black/5 flex text-[10px] font-bold transition-transform duration-100"
+             :class="{ 'shake-anim': isShaking }">
+          <button @click="switchMode('SERIAL')" :class="{'bg-white text-[var(--col-primary)] shadow-sm': mode==='SERIAL', 'text-[var(--text-sub)]': mode!=='SERIAL'}" class="flex-1 py-1.5 rounded transition-all">SERIAL</button>
+          <button @click="switchMode('TCP_CLIENT')" :class="{'bg-white text-[var(--col-primary)] shadow-sm': mode==='TCP_CLIENT', 'text-[var(--text-sub)]': mode!=='TCP_CLIENT'}" class="flex-1 py-1.5 rounded transition-all">TCP-C</button>
+          <button @click="switchMode('TCP_SERVER')" :class="{'bg-white text-[var(--col-primary)] shadow-sm': mode==='TCP_SERVER', 'text-[var(--text-sub)]': mode!=='TCP_SERVER'}" class="flex-1 py-1.5 rounded transition-all">TCP-S</button>
+          <button @click="switchMode('UDP')" :class="{'bg-white text-[var(--col-primary)] shadow-sm': mode==='UDP', 'text-[var(--text-sub)]': mode!=='UDP'}" class="flex-1 py-1.5 rounded transition-all">UDP</button>
         </div>
 
-        <div class="bg-white/40 p-3 rounded-lg shadow-sm border border-black/5 space-y-3">
+        <div class="bg-white/40 p-3 rounded-lg shadow-sm border border-black/5 space-y-3 overflow-hidden">
           <div class="text-xs font-bold text-[var(--text-sub)] opacity-70 uppercase tracking-wider mb-1">
             {{ mode.replace('_', ' ') }} Settings
           </div>
 
-          <template v-if="mode === 'SERIAL'">
-            <!-- Serial Inputs ... -->
-            <div class="control-group"><label>端口</label><div class="relative flex-1"><select v-model="selectedPort" @click="refreshPorts" class="morandi-input" :disabled="isConnected"><option v-for="p in portList" :key="p" :value="p">{{ p }}</option></select></div></div>
-            <div class="control-group"><label>波特率</label><div class="relative flex-1"><input type="number" v-model="baudRate" list="baud-list" class="morandi-input" placeholder="Custom" :disabled="isConnected"><datalist id="baud-list"><option v-for="b in baudOptions" :key="b" :value="b"></option></datalist></div></div>
-          </template>
+          <Transition name="fade" mode="out-in">
+            <div v-if="mode === 'SERIAL'" key="SERIAL" class="space-y-3">
+              <div class="control-group"><label>端口</label><div class="relative flex-1"><select v-model="selectedPort" @click="refreshPorts" class="morandi-input" :disabled="isConnected"><option v-for="p in portList" :key="p" :value="p">{{ p }}</option></select></div></div>
+              <div class="control-group"><label>波特率</label><div class="relative flex-1"><input type="number" v-model="baudRate" list="baud-list" class="morandi-input" placeholder="Custom" :disabled="isConnected"><datalist id="baud-list"><option v-for="b in baudOptions" :key="b" :value="b"></option></datalist></div></div>
+              <div class="control-group"><label>数据位</label><select v-model="dataBits" class="morandi-input flex-1" :disabled="isConnected"><option value="8">8</option><option value="7">7</option><option value="6">6</option><option value="5">5</option></select></div>
+              <div class="control-group"><label>校验位</label><select v-model="parity" class="morandi-input flex-1" :disabled="isConnected"><option value="None">None</option><option value="Odd">Odd</option><option value="Even">Even</option><option value="Mark">Mark</option><option value="Space">Space</option></select></div>
+              <div class="control-group"><label>停止位</label><select v-model="stopBits" class="morandi-input flex-1" :disabled="isConnected"><option value="1">1</option><option value="1.5">1.5</option><option value="2">2</option></select></div>
+            </div>
 
-          <template v-if="mode === 'TCP_CLIENT'">
-            <div class="control-group"><label>IP</label><input type="text" v-model="netIp" class="morandi-input" placeholder="127.0.0.1" :disabled="isConnected"></div>
-            <div class="control-group"><label>Port</label><input type="text" v-model="netPort" class="morandi-input" placeholder="43211" :disabled="isConnected"></div>
-          </template>
+            <div v-else-if="mode === 'TCP_CLIENT'" key="TCP_CLIENT" class="space-y-3">
+              <div class="control-group"><label>IP</label><input type="text" v-model="netIp" class="morandi-input" placeholder="127.0.0.1" :disabled="isConnected"></div>
+              <div class="control-group"><label>Port</label><input type="text" v-model="netPort" class="morandi-input" placeholder="43211" :disabled="isConnected"></div>
+            </div>
 
-          <template v-if="mode === 'TCP_SERVER'">
-            <div class="control-group"><label>Local Port</label><input type="text" v-model="netPort" class="morandi-input" placeholder="8080" :disabled="isConnected"></div>
-          </template>
+            <div v-else-if="mode === 'TCP_SERVER'" key="TCP_SERVER" class="space-y-3">
+              <div class="control-group"><label>Local Port</label><input type="text" v-model="netPort" class="morandi-input" placeholder="8080" :disabled="isConnected"></div>
+            </div>
 
-          <template v-if="mode === 'UDP'">
-            <div class="control-group"><label>Local Port</label><input type="text" v-model="udpLocalPort" class="morandi-input" placeholder="8081" :disabled="isConnected"></div>
-            <div class="my-2 border-t border-black/5"></div>
-            <div class="control-group"><label>Target IP</label><input type="text" v-model="netIp" class="morandi-input" placeholder="127.0.0.1" :disabled="isConnected"></div>
-            <div class="control-group"><label>Target Port</label><input type="text" v-model="netPort" class="morandi-input" placeholder="8080" :disabled="isConnected"></div>
-          </template>
+            <div v-else-if="mode === 'UDP'" key="UDP" class="space-y-3">
+              <div class="control-group"><label>Local Port</label><input type="text" v-model="udpLocalPort" class="morandi-input" placeholder="8081" :disabled="isConnected"></div>
+              <div class="my-2 border-t border-black/5"></div>
+              <div class="control-group"><label>Target IP</label><input type="text" v-model="netIp" class="morandi-input" placeholder="127.0.0.1" :disabled="isConnected"></div>
+              <div class="control-group"><label>Target Port</label><input type="text" v-model="netPort" class="morandi-input" placeholder="8080" :disabled="isConnected"></div>
+            </div>
+          </Transition>
         </div>
 
         <button @click="toggleConnection" class="w-full py-2.5 rounded-lg font-medium text-white transition-all duration-300 transform active:scale-[0.98] shadow-sm flex items-center justify-center space-x-2 bg-[var(--col-primary)] hover:opacity-90">
@@ -276,16 +342,55 @@ const scrollToBottom = () => {
           <div class="flex items-center space-x-4">
             <span class="text-xs font-bold text-[var(--text-sub)] tracking-wider">TX EDITOR</span>
 
-            <!-- 新增：Add Newline 复选框 -->
-            <label class="flex items-center space-x-1 cursor-pointer hover:text-[var(--col-primary)]" title="发送时自动追加换行符">
-              <input type="checkbox" v-model="appendNewline" class="accent-[var(--col-primary)] w-3 h-3">
-              <span class="text-[11px] text-[var(--text-sub)]">Add Newline (\n)</span>
-            </label>
+            <div class="flex items-center gap-3">
+              <!-- Hex Send Checkbox -->
+              <label class="flex items-center space-x-1.5 cursor-pointer hover:text-[var(--col-primary)] transition-colors select-none">
+                <input type="checkbox" v-model="hexSend" class="accent-[var(--col-primary)] w-3.5 h-3.5 rounded-sm">
+                <span class="text-[11px] font-bold opacity-70">Hex Send</span>
+              </label>
+
+              <div class="w-[1px] h-3 bg-black/10"></div>
+
+              <!-- EOL 控件 -->
+              <div class="relative z-10" :class="{'opacity-50 pointer-events-none': hexSend}" title="Hex Send 模式下禁用">
+                <button
+                    @click="showEolDropdown = !showEolDropdown"
+                    class="flex items-center space-x-1.5 bg-black/5 hover:bg-black/10 transition-all px-2.5 rounded-md border border-transparent focus:border-black/5 outline-none h-7"
+                    :class="{'text-[var(--col-primary)] bg-[var(--col-primary)]/10 border-[var(--col-primary)]/20': showEolDropdown}"
+                >
+                  <div class="flex items-baseline space-x-1 translate-y-[0.5px]">
+                    <span class="text-[11px] font-bold opacity-70 leading-tight">EOL:</span>
+                    <span class="text-[11px] font-mono font-medium min-w-[30px] text-center leading-tight">{{ currentEolLabel }}</span>
+                  </div>
+                  <svg class="w-3 h-3 opacity-50 transform transition-transform duration-200" :class="{'rotate-180': showEolDropdown}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                </button>
+
+                <div v-if="showEolDropdown" @click="showEolDropdown = false" class="fixed inset-0 z-0 cursor-default"></div>
+
+                <Transition name="slide-fade">
+                  <div v-if="showEolDropdown" class="absolute top-full right-0 mt-1.5 w-32 bg-white/80 backdrop-blur-xl shadow-[0_4px_16px_-4px_rgba(0,0,0,0.1)] border border-white/50 rounded-lg p-1 z-50 flex flex-col overflow-hidden select-none ring-1 ring-black/5">
+                    <button
+                        v-for="opt in eolOptions"
+                        :key="opt.value"
+                        @click="selectEol(opt.value as any)"
+                        class="relative flex items-center justify-between w-full px-3 py-2 text-[11px] font-mono rounded-md transition-all outline-none"
+                        :class="lineEndingMode === opt.value ? 'bg-[var(--col-primary)] text-white shadow-sm font-medium' : 'text-[var(--text-main)] hover:bg-black/5'"
+                    >
+                      <span>{{ opt.label }}</span>
+                      <span v-if="lineEndingMode === opt.value" class="text-[10px] font-bold">✓</span>
+                    </button>
+                  </div>
+                </Transition>
+              </div>
+            </div>
+
           </div>
         </div>
 
         <div class="flex-1 flex p-3 gap-3">
-          <textarea v-model="sendInput" class="flex-1 bg-white/50 border border-transparent focus:border-[var(--col-primary)]/30 rounded-lg p-3 font-mono text-sm text-[var(--text-main)] focus:bg-white transition-all outline-none resize-none placeholder-[var(--text-sub)]/50" placeholder="Input data to send..." @keydown.enter.ctrl.prevent="handleSend"></textarea>
+          <textarea v-model="sendInput" class="flex-1 bg-white/50 border border-transparent focus:border-[var(--col-primary)]/30 rounded-lg p-3 font-mono text-sm text-[var(--text-main)] focus:bg-white transition-all outline-none resize-none placeholder-[var(--text-sub)]/50"
+                    :placeholder="hexSend ? 'Input Hex (e.g., AA BB CC)...' : 'Input data to send...'"
+                    @keydown.enter.ctrl.prevent="handleSend"></textarea>
           <div class="flex flex-col gap-2 w-20">
             <button @click="handleSend" class="flex-1 bg-[var(--col-primary)] hover:opacity-90 text-white rounded-lg shadow-sm transition-all flex flex-col items-center justify-center active:scale-95"><span class="text-xs font-bold tracking-widest">SEND</span></button>
             <button @click="sendInput=''" class="h-8 bg-black/5 text-[var(--text-sub)] hover:bg-black/10 rounded-lg text-xs">CLR</button>
@@ -306,4 +411,38 @@ const scrollToBottom = () => {
 .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
 .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.15); border-radius: 3px; }
 .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: var(--col-primary); }
+
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+  transform: translateY(5px);
+}
+
+.slide-fade-enter-active {
+  transition: all 0.2s ease-out;
+}
+.slide-fade-leave-active {
+  transition: all 0.15s cubic-bezier(1, 0.5, 0.8, 1);
+}
+.slide-fade-enter-from,
+.slide-fade-leave-to {
+  transform: translateY(-5px);
+  opacity: 0;
+}
+
+@keyframes shake-x {
+  0%, 100% { transform: translateX(0); }
+  10%, 30%, 50%, 70%, 90% { transform: translateX(-4px); }
+  20%, 40%, 60%, 80% { transform: translateX(4px); }
+}
+
+.shake-anim {
+  animation: shake-x 0.4s cubic-bezier(0.36, 0.07, 0.19, 0.97) both;
+  border-color: rgba(239, 68, 68, 0.5);
+}
 </style>
