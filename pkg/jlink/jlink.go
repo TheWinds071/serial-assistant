@@ -10,6 +10,9 @@ import (
 	"unsafe"
 )
 
+// LogCallback 日志回调函数类型
+type LogCallback func(message string)
+
 // JLinkWrapper 封装 J-Link API
 type JLinkWrapper struct {
 	libHandle uintptr
@@ -33,6 +36,9 @@ type JLinkWrapper struct {
 	useSoftRTT    bool
 	rttControlBlk uint32
 	rttUpBuffer   RTTBufferDesc
+
+	// 日志回调
+	logCallback LogCallback
 }
 
 // RTTBufferDesc RTT 缓冲区描述符
@@ -46,13 +52,15 @@ type RTTBufferDesc struct {
 }
 
 // NewJLinkWrapper 加载驱动并初始化
-func NewJLinkWrapper() (*JLinkWrapper, error) {
+func NewJLinkWrapper(logCallback LogCallback) (*JLinkWrapper, error) {
 	libPath, err := getLibraryPath()
 	if err != nil {
 		return nil, err
 	}
 
-	fmt.Printf("[JLink] Loading library: %s\n", libPath)
+	if logCallback != nil {
+		logCallback(fmt.Sprintf("[J-Link] 正在加载库: %s", libPath))
+	}
 
 	// [修复关键点]
 	// 这里直接调用我们自己在 loader_*.go 中定义的 openLibrary
@@ -61,7 +69,9 @@ func NewJLinkWrapper() (*JLinkWrapper, error) {
 	if err != nil {
 		// Linux 备用路径逻辑也改用 openLibrary
 		if runtime.GOOS == "linux" && libPath == "./libjlinkarm.so" {
-			fmt.Println("[JLink] Local load failed, trying /opt/SEGGER/JLink/libjlinkarm.so")
+			if logCallback != nil {
+				logCallback("[J-Link] 本地加载失败，尝试 /opt/SEGGER/JLink/libjlinkarm.so")
+			}
 			lib, err = openLibrary("/opt/SEGGER/JLink/libjlinkarm.so")
 		}
 		if err != nil {
@@ -69,7 +79,7 @@ func NewJLinkWrapper() (*JLinkWrapper, error) {
 		}
 	}
 
-	jl := &JLinkWrapper{libHandle: lib}
+	jl := &JLinkWrapper{libHandle: lib, logCallback: logCallback}
 
 	// 注册函数 - registerLibFunc 是跨平台的，可以在这里安全使用
 	register := func(dest interface{}, name string) {
@@ -90,16 +100,23 @@ func NewJLinkWrapper() (*JLinkWrapper, error) {
 	register(&jl.apiRTTWrite, "JLINK_RTT_Write")
 
 	if jl.apiOpen == nil || jl.apiReadMem == nil {
-		return nil, fmt.Errorf("J-Link library loaded but missing core functions")
+		return nil, fmt.Errorf("J-Link 库已加载但缺少核心函数")
 	}
 
 	return jl, nil
 }
 
+// log 内部日志辅助函数
+func (jl *JLinkWrapper) log(message string) {
+	if jl.logCallback != nil {
+		jl.logCallback(message)
+	}
+}
+
 // Connect 连接芯片
 func (jl *JLinkWrapper) Connect(chipName string, speed int, iface string) error {
 	if jl.apiOpen == nil {
-		return fmt.Errorf("J-Link API not initialized")
+		return fmt.Errorf("J-Link API 未初始化")
 	}
 	jl.apiOpen()
 
@@ -120,23 +137,23 @@ func (jl *JLinkWrapper) Connect(chipName string, speed int, iface string) error 
 
 	if jl.apiConnect != nil {
 		if ret := jl.apiConnect(); ret < 0 {
-			return fmt.Errorf("J-Link Connect failed (Ret: %d)", ret)
+			return fmt.Errorf("J-Link 连接失败 (返回值: %d)", ret)
 		}
 	}
 
-	fmt.Println("[JLink] Connected, waiting for chip stabilization...")
+	jl.log("[J-Link] 已连接，等待芯片稳定...")
 	time.Sleep(500 * time.Millisecond)
 
 	if jl.apiRTTStart != nil && jl.apiRTTRead != nil {
-		fmt.Println("[JLink] Trying native RTT...")
+		jl.log("[J-Link] 尝试启动原生 RTT...")
 		if ret := jl.apiRTTStart(); ret >= 0 {
-			fmt.Println("[JLink] Native RTT started")
+			jl.log("[J-Link] 原生 RTT 已启动")
 			jl.useSoftRTT = false
 			return nil
 		}
 	}
 
-	fmt.Println("[JLink] Native RTT unavailable, switching to Soft RTT")
+	jl.log("[J-Link] 原生 RTT 不可用，切换到软件 RTT")
 	var err error
 	for i := 0; i < 3; i++ {
 		if err = jl.initSoftRTT(); err == nil {
@@ -146,7 +163,7 @@ func (jl *JLinkWrapper) Connect(chipName string, speed int, iface string) error 
 		time.Sleep(500 * time.Millisecond)
 	}
 
-	return fmt.Errorf("Soft RTT init failed: %v", err)
+	return fmt.Errorf("软件 RTT 初始化失败: %v", err)
 }
 
 func (jl *JLinkWrapper) ReadRTT() ([]byte, error) {
@@ -196,6 +213,7 @@ func (jl *JLinkWrapper) initSoftRTT() error {
 	memBuf := make([]byte, chunkSize)
 	signature := []byte("SEGGER RTT")
 
+	jl.log("[J-Link] 搜索 RTT 控制块...")
 	for offset := uint32(0); offset < searchSize; offset += chunkSize {
 		addr := searchStart + offset
 		if jl.apiReadMem(addr, chunkSize, uintptr(unsafe.Pointer(&memBuf[0]))) < 0 {
@@ -204,16 +222,18 @@ func (jl *JLinkWrapper) initSoftRTT() error {
 		idx := bytes.Index(memBuf, signature)
 		if idx >= 0 {
 			jl.rttControlBlk = addr + uint32(idx)
+			jl.log(fmt.Sprintf("[J-Link] 找到 RTT 控制块 @ 0x%08X", jl.rttControlBlk))
 			descAddr := jl.rttControlBlk + 16 + 4 + 4
 			descData := make([]byte, 24)
 			if jl.apiReadMem(descAddr, 24, uintptr(unsafe.Pointer(&descData[0]))) < 0 {
-				return fmt.Errorf("Read RTT descriptor failed")
+				return fmt.Errorf("读取 RTT 描述符失败")
 			}
 			jl.rttUpBuffer = parseBufferDesc(descData)
+			jl.log("[J-Link] 软件 RTT 初始化成功")
 			return nil
 		}
 	}
-	return fmt.Errorf("SEGGER RTT Control Block not found")
+	return fmt.Errorf("未找到 SEGGER RTT 控制块")
 }
 
 func (jl *JLinkWrapper) readSoftRTT() ([]byte, error) {
