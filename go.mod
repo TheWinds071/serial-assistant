@@ -3,6 +3,7 @@ module serial-assistant
 go 1.23
 
 require (
+	github.com/ebitengine/purego v0.9.1
 	github.com/wailsapp/wails/v2 v2.11.0
 	go.bug.st/serial v1.6.4
 )

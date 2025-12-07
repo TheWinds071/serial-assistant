@@ -10,6 +10,10 @@ export function GetSerialPorts() {
   return window['go']['main']['App']['GetSerialPorts']();
 }
 
+export function OpenJLink(arg1, arg2, arg3) {
+  return window['go']['main']['App']['OpenJLink'](arg1, arg2, arg3);
+}
+
 export function OpenSerial(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['main']['App']['OpenSerial'](arg1, arg2, arg3, arg4, arg5);
 }

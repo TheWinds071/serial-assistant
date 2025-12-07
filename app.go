@@ -8,6 +8,8 @@ import (
 	"sync"
 	"time"
 
+	"serial-assistant/pkg/jlink" // 引入刚才创建的包
+
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 	"go.bug.st/serial"
 )
@@ -20,6 +22,7 @@ const (
 	TypeTcpClient ConnectionType = "TCP_CLIENT"
 	TypeTcpServer ConnectionType = "TCP_SERVER"
 	TypeUdp       ConnectionType = "UDP"
+	TypeJLink     ConnectionType = "JLINK" // 新增 JLink 类型
 )
 
 // App struct
@@ -38,6 +41,9 @@ type App struct {
 	netListener net.Listener   // 用于 TCP Server
 	udpConn     net.PacketConn // 用于 UDP
 	udpRemote   net.Addr       // UDP 远程地址 (用于发送)
+
+	// J-Link 资源
+	jlinkConn *jlink.JLinkWrapper
 }
 
 // NewApp creates a new App application struct
@@ -123,6 +129,75 @@ func (a *App) OpenSerial(portName string, baudRate int, dataBits int, stopBits i
 	return "Success"
 }
 
+// OpenJLink 连接 J-Link
+func (a *App) OpenJLink(chip string, speed int, iface string) string {
+	a.mutex.Lock()
+	defer a.mutex.Unlock()
+
+	if a.isConnected {
+		return "Already connected"
+	}
+
+	// 1. 加载驱动
+	jl, err := jlink.NewJLinkWrapper()
+	if err != nil {
+		return err.Error()
+	}
+
+	// 2. 连接芯片
+	err = jl.Connect(chip, speed, iface)
+	if err != nil {
+		// 连接失败需要释放资源
+		jl.Close()
+		return err.Error()
+	}
+
+	a.jlinkConn = jl
+	a.connType = TypeJLink
+	a.isConnected = true
+	a.readStopChan = make(chan struct{})
+
+	// 3. 启动 J-Link 专用读取循环 (因为它的 API 不是 io.Reader 风格，而是轮询)
+	go a.jlinkReadLoop()
+
+	return "Success"
+}
+
+// jlinkReadLoop 专用的 RTT 轮询循环
+func (a *App) jlinkReadLoop() {
+	ticker := time.NewTicker(10 * time.Millisecond) // 10ms 轮询一次
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-a.readStopChan:
+			return
+		case <-ticker.C:
+			// 检查连接是否还在 (需要加锁读取 jlinkConn，或者假设 stopChan 会处理)
+			// 注意：这里为了性能，简单处理，如果 closed 会置为 nil，所以要小心
+			a.mutex.Lock()
+			jl := a.jlinkConn
+			a.mutex.Unlock()
+
+			if jl == nil {
+				return
+			}
+
+			data, err := jl.ReadRTT()
+			if err != nil {
+				// 读取错误通常意味着掉线
+				runtime.EventsEmit(a.ctx, "serial-error", fmt.Sprintf("J-Link RTT Error: %v", err))
+				a.Close()
+				return
+			}
+
+			if len(data) > 0 {
+				runtime.EventsEmit(a.ctx, "serial-data", data)
+			}
+		}
+	}
+}
+
 // OpenTcpClient 连接 TCP 服务端
 func (a *App) OpenTcpClient(ip string, port string) string {
 	a.mutex.Lock()
@@ -133,7 +208,6 @@ func (a *App) OpenTcpClient(ip string, port string) string {
 	}
 
 	address := net.JoinHostPort(ip, port)
-	// 设置超时，防止界面卡死
 	conn, err := net.DialTimeout("tcp", address, 3*time.Second)
 	if err != nil {
 		return fmt.Sprintf("Connect error: %v", err)
@@ -165,7 +239,6 @@ func (a *App) OpenTcpServer(port string) string {
 	a.isConnected = true
 	a.readStopChan = make(chan struct{})
 
-	// 启动监听协程
 	go func() {
 		for {
 			select {
@@ -179,14 +252,12 @@ func (a *App) OpenTcpServer(port string) string {
 
 				a.mutex.Lock()
 				if a.netConn != nil {
-					a.netConn.Close() // 关闭旧连接
+					a.netConn.Close()
 				}
 				a.netConn = conn
 				a.mutex.Unlock()
 
 				runtime.EventsEmit(a.ctx, "sys-msg", fmt.Sprintf("Client connected: %s", conn.RemoteAddr().String()))
-
-				// 针对这个连接启动读取
 				go a.handleTcpConnection(conn)
 			}
 		}
@@ -202,13 +273,12 @@ func (a *App) handleTcpConnection(conn net.Conn) {
 		if err != nil {
 			a.mutex.Lock()
 			if a.netConn == conn {
-				a.netConn = nil // 清理引用
+				a.netConn = nil
 			}
 			a.mutex.Unlock()
 			return
 		}
 		if n > 0 {
-			// 数据拷贝，防止并发冲突
 			dataToSend := make([]byte, n)
 			copy(dataToSend, buff[:n])
 			runtime.EventsEmit(a.ctx, "serial-data", dataToSend)
@@ -256,11 +326,9 @@ func (a *App) OpenUdp(localPort string, remoteIp string, remotePort string) stri
 				conn.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
 				n, addr, err := conn.ReadFrom(buff)
 				if err != nil {
-					// 忽略超时错误，继续循环
 					if nerr, ok := err.(net.Error); ok && nerr.Timeout() {
 						continue
 					}
-					// 忽略关闭连接时的错误
 					if a.isConnected {
 						runtime.EventsEmit(a.ctx, "serial-error", err.Error())
 					}
@@ -288,7 +356,6 @@ func (a *App) OpenUdp(localPort string, remoteIp string, remotePort string) stri
 
 // --- 通用方法 ---
 
-// 启动通用的 io.Reader 读取循环 (Serial / TCP Client)
 func (a *App) startReadLoop(reader io.Reader) {
 	a.isConnected = true
 	a.readStopChan = make(chan struct{})
@@ -303,7 +370,6 @@ func (a *App) startReadLoop(reader io.Reader) {
 				n, err := reader.Read(buff)
 				if err != nil {
 					if a.isConnected {
-						// 只有在人为认为连接还开着的时候报错，才通知前端
 						fmt.Printf("Read Error: %v\n", err)
 						runtime.EventsEmit(a.ctx, "serial-error", err.Error())
 						a.Close()
@@ -314,10 +380,7 @@ func (a *App) startReadLoop(reader io.Reader) {
 					continue
 				}
 
-				// [DEBUG] 在终端打印收到的数据长度，用于排查接收问题
 				fmt.Printf("[DEBUG] Recv %d bytes\n", n)
-
-				// 必须拷贝数据，防止 Wails 发送过程中 buff 被覆盖
 				dataToSend := make([]byte, n)
 				copy(dataToSend, buff[:n])
 				runtime.EventsEmit(a.ctx, "serial-data", dataToSend)
@@ -326,7 +389,7 @@ func (a *App) startReadLoop(reader io.Reader) {
 	}()
 }
 
-// Close 关闭连接 (通用)
+// Close 关闭连接
 func (a *App) Close() string {
 	a.mutex.Lock()
 	defer a.mutex.Unlock()
@@ -347,6 +410,11 @@ func (a *App) Close() string {
 		if a.serialPort != nil {
 			err = a.serialPort.Close()
 			a.serialPort = nil
+		}
+	case TypeJLink:
+		if a.jlinkConn != nil {
+			a.jlinkConn.Close()
+			a.jlinkConn = nil
 		}
 	case TypeTcpClient:
 		if a.netConn != nil {
@@ -376,7 +444,7 @@ func (a *App) Close() string {
 	return "Success"
 }
 
-// SendData 发送数据 (通用)
+// SendData 发送数据
 func (a *App) SendData(data string) string {
 	a.mutex.Lock()
 	defer a.mutex.Unlock()
@@ -385,8 +453,6 @@ func (a *App) SendData(data string) string {
 		return "Error: Not connected"
 	}
 
-	// [修改] 移除了自动添加 \n 的逻辑，现在完全由前端控制
-
 	payload := []byte(data)
 	var err error
 
@@ -394,6 +460,10 @@ func (a *App) SendData(data string) string {
 	case TypeSerial:
 		if a.serialPort != nil {
 			_, err = a.serialPort.Write(payload)
+		}
+	case TypeJLink:
+		if a.jlinkConn != nil {
+			_, err = a.jlinkConn.WriteRTT(payload)
 		}
 	case TypeTcpClient, TypeTcpServer:
 		if a.netConn != nil {

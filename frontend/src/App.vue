@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, nextTick, watch, computed, reactive } from 'vue';
-// 引入后端方法
-import { GetSerialPorts, OpenSerial, OpenTcpClient, OpenTcpServer, OpenUdp, Close as CloseConnection, SendData } from '../wailsjs/go/main/App';
+// 引入后端方法 (新增 OpenJLink)
+import { GetSerialPorts, OpenSerial, OpenTcpClient, OpenTcpServer, OpenUdp, OpenJLink, Close as CloseConnection, SendData } from '../wailsjs/go/main/App';
 import { EventsOn } from '../wailsjs/runtime/runtime';
 
 // --- 1. 核心状态 ---
@@ -9,8 +9,22 @@ const portList = ref<string[]>([]);
 const selectedPort = ref('');
 const isConnected = ref(false);
 
-// 模式选择
-const mode = ref<'SERIAL' | 'TCP_CLIENT' | 'TCP_SERVER' | 'UDP'>('SERIAL');
+// 模式选择 (新增 JLINK)
+type ConnectionMode = 'SERIAL' | 'TCP_CLIENT' | 'TCP_SERVER' | 'UDP' | 'JLINK';
+const mode = ref<ConnectionMode>('SERIAL');
+const showMoreModes = ref(false); // 控制更多菜单显示
+
+// 切换模式辅助函数
+const switchMode = (m: ConnectionMode) => {
+  if (isConnected.value) {
+    isShaking.value = true;
+    setTimeout(() => { isShaking.value = false; }, 500);
+    return;
+  }
+  mode.value = m;
+  showMoreModes.value = false;
+};
+
 // 震动动画状态
 const isShaking = ref(false);
 
@@ -25,6 +39,11 @@ const baudOptions = [9600, 19200, 38400, 57600, 115200, 921600];
 const netIp = ref('127.0.0.1');
 const netPort = ref('43211');
 const udpLocalPort = ref('8081');
+
+// J-Link 参数 (新增)
+const jlinkChip = ref('STM32H750VB');
+const jlinkSpeed = ref(8000);
+const jlinkInterface = ref('SWD');
 
 // --- 2. 数据处理 ---
 const receivedData = ref<string>('');
@@ -61,15 +80,49 @@ const txCount = ref(0);
 
 // --- 3. UI 状态 (主题 & 弹窗) ---
 const showThemePanel = ref(false);
-const defaultTheme = {
-  bgMain: '#F2F1ED', bgSide: '#EBEAE6', primary: '#7A8B99', textMain: '#5C5C5C', textSub: '#888888', error: '#CF6679'
+// 定义主题类型以避免索引错误
+type ThemeType = {
+  bgMain: string;
+  bgSide: string;
+  primary: string;
+  textMain: string;
+  textSub: string;
+  error: string;
+};
+
+const defaultTheme: ThemeType = {
+  bgMain: '#F2F1ED',
+  bgSide: '#EBEAE6',
+  primary: '#7A8B99',
+  textMain: '#5C5C5C',
+  textSub: '#888888',
+  error: '#CF6679'
 };
 const theme = reactive({ ...defaultTheme });
+
 const cssVars = computed(() => ({
-  '--bg-main': theme.bgMain, '--bg-side': theme.bgSide, '--col-primary': theme.primary,
-  '--text-main': theme.textMain, '--text-sub': theme.textSub, '--col-error': theme.error
+  '--bg-main': theme.bgMain,
+  '--bg-side': theme.bgSide,
+  '--col-primary': theme.primary,
+  '--text-main': theme.textMain,
+  '--text-sub': theme.textSub,
+  '--col-error': theme.error
 }));
+
 const resetTheme = () => Object.assign(theme, defaultTheme);
+
+// 辅助：获取友好的显示名称
+const getThemeLabel = (key: string) => {
+  const map: Record<string, string> = {
+    bgMain: '主背景',
+    bgSide: '侧边栏',
+    primary: '主色调',
+    textMain: '主要文字',
+    textSub: '次要文字',
+    error: '错误色'
+  };
+  return map[key] || key;
+};
 
 // 自定义弹窗状态
 const modal = reactive({
@@ -109,7 +162,6 @@ onMounted(async () => {
     }
 
     if (bytes && bytes.length > 0) {
-      console.log(`RX: ${bytes.length} bytes`, bytes);
       rawDataBuffer.value.push(...bytes);
       rxCount.value += bytes.length;
       receivedData.value += formatData(bytes, showHex.value);
@@ -120,7 +172,6 @@ onMounted(async () => {
   EventsOn("serial-error", (err) => {
     console.error("Connection error:", err);
     isConnected.value = false;
-    // 替换 alert -> showModal
     showModal("连接断开", String(err), 'error');
   });
 
@@ -144,15 +195,6 @@ const refreshPorts = async () => {
   } catch (e) { console.error(e); }
 };
 
-const switchMode = (targetMode: typeof mode.value) => {
-  if (isConnected.value) {
-    isShaking.value = true;
-    setTimeout(() => { isShaking.value = false; }, 500);
-    return;
-  }
-  mode.value = targetMode;
-};
-
 const toggleConnection = async () => {
   if (isConnected.value) {
     await CloseConnection();
@@ -162,6 +204,9 @@ const toggleConnection = async () => {
     if (mode.value === 'SERIAL') {
       if (!selectedPort.value) return;
       res = await OpenSerial(selectedPort.value, Number(baudRate.value), Number(dataBits.value), Number(stopBits.value), parity.value);
+    } else if (mode.value === 'JLINK') {
+      if (!jlinkChip.value) return;
+      res = await OpenJLink(jlinkChip.value, Number(jlinkSpeed.value), jlinkInterface.value);
     } else if (mode.value === 'TCP_CLIENT') {
       if (!netIp.value || !netPort.value) return;
       res = await OpenTcpClient(netIp.value, netPort.value);
@@ -176,7 +221,6 @@ const toggleConnection = async () => {
     if (res === "Success") {
       isConnected.value = true;
     } else {
-      // 替换 alert -> showModal
       showModal("连接失败", res, 'error');
     }
   }
@@ -247,40 +291,98 @@ const scrollToBottom = () => {
 </script>
 
 <template>
-  <div :style="cssVars" class="flex h-screen w-screen bg-[var(--bg-main)] text-[var(--text-main)] font-sans overflow-hidden select-none transition-colors duration-300">
+  <div :style="cssVars as any" class="flex h-screen w-screen bg-[var(--bg-main)] text-[var(--text-main)] font-sans overflow-hidden select-none transition-colors duration-300">
 
     <!-- 侧边栏 -->
     <div class="w-72 bg-[var(--bg-side)] flex flex-col shrink-0 border-r border-black/5 transition-colors duration-300 relative">
       <div class="h-14 flex items-center justify-between px-4 border-b border-black/5">
         <span class="font-bold text-lg tracking-widest text-[var(--col-primary)]">SERIAL MATE</span>
-        <button @click="showThemePanel = !showThemePanel" class="p-1.5 rounded-md hover:bg-black/5 text-[var(--text-sub)] transition-colors">
+        <button @click="showThemePanel = !showThemePanel" class="p-1.5 rounded-md hover:bg-black/5 text-[var(--text-sub)] transition-colors" :class="{'bg-black/5': showThemePanel}">
           <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="13.5" cy="6.5" r=".5"></circle><circle cx="17.5" cy="10.5" r=".5"></circle><circle cx="8.5" cy="7.5" r=".5"></circle><circle cx="6.5" cy="12.5" r=".5"></circle><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z"></path></svg>
         </button>
       </div>
 
-      <!-- 主题面板 -->
-      <div v-if="showThemePanel" class="absolute top-14 left-0 w-full bg-white/90 backdrop-blur-md p-4 shadow-lg border-b border-black/5 z-20 space-y-3">
-        <div class="flex justify-between items-center text-xs font-bold text-[var(--text-sub)]">
-          <span>自定义配色</span> <button @click="resetTheme">重置</button>
-        </div>
-      </div>
+      <!-- 主题面板 (已修复：添加了颜色输入控件) -->
+      <Transition name="slide-down">
+        <div v-if="showThemePanel" class="absolute top-14 left-0 w-full bg-white/95 backdrop-blur-md p-4 shadow-xl border-b border-black/5 z-20 flex flex-col gap-3">
+          <div class="flex justify-between items-center text-xs font-bold text-[var(--text-sub)] mb-1">
+            <span>自定义配色</span>
+            <button @click="resetTheme" class="hover:text-[var(--col-primary)] transition-colors">重置默认</button>
+          </div>
 
-      <div class="flex-1 overflow-y-auto p-5 space-y-5 custom-scrollbar">
-        <!-- 模式切换 -->
-        <div class="bg-white/40 p-1 rounded-lg shadow-sm border border-black/5 flex text-[10px] font-bold transition-transform duration-100"
-             :class="{ 'shake-anim': isShaking }">
-          <button @click="switchMode('SERIAL')" :class="{'bg-white text-[var(--col-primary)] shadow-sm': mode==='SERIAL', 'text-[var(--text-sub)]': mode!=='SERIAL'}" class="flex-1 py-1.5 rounded transition-all">SERIAL</button>
-          <button @click="switchMode('TCP_CLIENT')" :class="{'bg-white text-[var(--col-primary)] shadow-sm': mode==='TCP_CLIENT', 'text-[var(--text-sub)]': mode!=='TCP_CLIENT'}" class="flex-1 py-1.5 rounded transition-all">TCP-C</button>
-          <button @click="switchMode('TCP_SERVER')" :class="{'bg-white text-[var(--col-primary)] shadow-sm': mode==='TCP_SERVER', 'text-[var(--text-sub)]': mode!=='TCP_SERVER'}" class="flex-1 py-1.5 rounded transition-all">TCP-S</button>
-          <button @click="switchMode('UDP')" :class="{'bg-white text-[var(--col-primary)] shadow-sm': mode==='UDP', 'text-[var(--text-sub)]': mode!=='UDP'}" class="flex-1 py-1.5 rounded transition-all">UDP</button>
+          <div class="grid grid-cols-2 gap-3">
+            <div v-for="(val, key) in theme" :key="key" class="flex flex-col gap-1">
+              <label class="text-[10px] font-bold text-[var(--text-sub)] uppercase tracking-wide">{{ getThemeLabel(key.toString()) }}</label>
+              <div class="flex items-center gap-2 bg-black/5 rounded p-1 pl-2">
+                <input type="color" v-model="theme[key as keyof ThemeType]" class="w-5 h-5 rounded cursor-pointer border-none bg-transparent p-0 shrink-0">
+                <input type="text" v-model="theme[key as keyof ThemeType]" class="w-full bg-transparent border-none text-[10px] font-mono text-[var(--text-main)] focus:outline-none uppercase">
+              </div>
+            </div>
+          </div>
+        </div>
+      </Transition>
+
+      <div class="flex-1 overflow-y-auto p-5 space-y-5 custom-scrollbar relative z-10">
+
+        <!-- 模式切换区域 -->
+        <div class="flex gap-2 transition-transform duration-100" :class="{ 'shake-anim': isShaking }">
+          <!-- 常用模式平铺 -->
+          <div class="flex-1 bg-white/40 p-1 rounded-lg shadow-sm border border-black/5 flex gap-1 text-[10px] font-bold">
+            <button @click="switchMode('SERIAL')"
+                    :class="{'bg-white text-[var(--col-primary)] shadow-sm': mode==='SERIAL', 'text-[var(--text-sub)] hover:bg-black/5': mode!=='SERIAL'}"
+                    class="flex-1 py-1.5 rounded transition-all">SERIAL</button>
+            <button @click="switchMode('JLINK')"
+                    :class="{'bg-white text-[var(--col-primary)] shadow-sm': mode==='JLINK', 'text-[var(--text-sub)] hover:bg-black/5': mode!=='JLINK'}"
+                    class="flex-1 py-1.5 rounded transition-all">J-LINK</button>
+            <button @click="switchMode('TCP_CLIENT')"
+                    :class="{'bg-white text-[var(--col-primary)] shadow-sm': mode==='TCP_CLIENT', 'text-[var(--text-sub)] hover:bg-black/5': mode!=='TCP_CLIENT'}"
+                    class="flex-1 py-1.5 rounded transition-all">TCP-C</button>
+          </div>
+
+          <!-- 更多模式汉堡按钮 -->
+          <div class="relative">
+            <button @click="showMoreModes = !showMoreModes"
+                    class="h-full px-2.5 bg-white/40 hover:bg-white/60 rounded-lg shadow-sm border border-black/5 flex items-center justify-center text-[var(--text-sub)] transition-all z-50 relative"
+                    :class="{'bg-white text-[var(--col-primary)]': showMoreModes || (mode !== 'SERIAL' && mode !== 'JLINK' && mode !== 'TCP_CLIENT')}">
+              <svg class="w-4 h-4 overflow-visible" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="3" y1="6" x2="21" y2="6" class="transition-all duration-300 origin-[12px_12px]" :class="showMoreModes ? 'translate-y-[6px] rotate-45' : ''"></line>
+                <line x1="3" y1="12" x2="21" y2="12" class="transition-all duration-300" :class="showMoreModes ? 'opacity-0' : ''"></line>
+                <line x1="3" y1="18" x2="21" y2="18" class="transition-all duration-300 origin-[12px_12px]" :class="showMoreModes ? '-translate-y-[6px] -rotate-45' : ''"></line>
+              </svg>
+            </button>
+
+            <!-- 点击遮罩 -->
+            <div v-if="showMoreModes" @click="showMoreModes = false" class="fixed inset-0 z-40 cursor-default"></div>
+
+            <!-- 下拉菜单 (已修复：添加了下拉动画 dropdown-fade) -->
+            <Transition name="dropdown-fade">
+              <div v-if="showMoreModes" class="absolute top-full right-0 mt-2 w-32 bg-white/95 backdrop-blur-xl shadow-xl border border-white/50 rounded-lg p-1.5 z-50 flex flex-col gap-1 ring-1 ring-black/5 origin-top-right">
+                <button @click="switchMode('TCP_SERVER')"
+                        class="flex items-center justify-between w-full px-3 py-2 text-[11px] font-bold rounded-md transition-all text-left"
+                        :class="mode === 'TCP_SERVER' ? 'bg-[var(--col-primary)] text-white shadow-sm' : 'text-[var(--text-main)] hover:bg-black/5'">
+                  <span>TCP SERVER</span>
+                  <span v-if="mode === 'TCP_SERVER'">✓</span>
+                </button>
+                <button @click="switchMode('UDP')"
+                        class="flex items-center justify-between w-full px-3 py-2 text-[11px] font-bold rounded-md transition-all text-left"
+                        :class="mode === 'UDP' ? 'bg-[var(--col-primary)] text-white shadow-sm' : 'text-[var(--text-main)] hover:bg-black/5'">
+                  <span>UDP</span>
+                  <span v-if="mode === 'UDP'">✓</span>
+                </button>
+              </div>
+            </Transition>
+          </div>
         </div>
 
+        <!-- 设置面板主体 -->
         <div class="bg-white/40 p-3 rounded-lg shadow-sm border border-black/5 space-y-3 overflow-hidden">
-          <div class="text-xs font-bold text-[var(--text-sub)] opacity-70 uppercase tracking-wider mb-1">
-            {{ mode.replace('_', ' ') }} Settings
+          <div class="text-xs font-bold text-[var(--text-sub)] opacity-70 uppercase tracking-wider mb-1 flex justify-between items-center">
+            <span>{{ mode.replace('_', ' ') }} Settings</span>
+            <span v-if="mode !== 'SERIAL' && mode !== 'JLINK' && mode !== 'TCP_CLIENT'" class="text-[10px] bg-[var(--col-primary)] text-white px-1.5 py-0.5 rounded-full">More</span>
           </div>
 
           <Transition name="fade" mode="out-in">
+            <!-- Serial Settings -->
             <div v-if="mode === 'SERIAL'" key="SERIAL" class="space-y-3">
               <div class="control-group"><label>端口</label><div class="relative flex-1"><select v-model="selectedPort" @click="refreshPorts" class="morandi-input" :disabled="isConnected"><option v-for="p in portList" :key="p" :value="p">{{ p }}</option></select></div></div>
               <div class="control-group"><label>波特率</label><div class="relative flex-1"><input type="number" v-model="baudRate" list="baud-list" class="morandi-input" placeholder="Custom" :disabled="isConnected"><datalist id="baud-list"><option v-for="b in baudOptions" :key="b" :value="b"></option></datalist></div></div>
@@ -289,15 +391,25 @@ const scrollToBottom = () => {
               <div class="control-group"><label>停止位</label><select v-model="stopBits" class="morandi-input flex-1" :disabled="isConnected"><option value="1">1</option><option value="1.5">1.5</option><option value="2">2</option></select></div>
             </div>
 
+            <!-- J-LINK Settings -->
+            <div v-else-if="mode === 'JLINK'" key="JLINK" class="space-y-3">
+              <div class="control-group"><label>Chip</label><input type="text" v-model="jlinkChip" class="morandi-input" placeholder="e.g. STM32F407VE" :disabled="isConnected"></div>
+              <div class="control-group"><label>Interface</label><select v-model="jlinkInterface" class="morandi-input flex-1" :disabled="isConnected"><option value="SWD">SWD</option><option value="JTAG">JTAG</option></select></div>
+              <div class="control-group"><label>Speed</label><input type="number" v-model="jlinkSpeed" class="morandi-input" placeholder="4000" :disabled="isConnected"></div>
+            </div>
+
+            <!-- TCP Client Settings -->
             <div v-else-if="mode === 'TCP_CLIENT'" key="TCP_CLIENT" class="space-y-3">
               <div class="control-group"><label>IP</label><input type="text" v-model="netIp" class="morandi-input" placeholder="127.0.0.1" :disabled="isConnected"></div>
               <div class="control-group"><label>Port</label><input type="text" v-model="netPort" class="morandi-input" placeholder="43211" :disabled="isConnected"></div>
             </div>
 
+            <!-- TCP Server Settings -->
             <div v-else-if="mode === 'TCP_SERVER'" key="TCP_SERVER" class="space-y-3">
               <div class="control-group"><label>Local Port</label><input type="text" v-model="netPort" class="morandi-input" placeholder="8080" :disabled="isConnected"></div>
             </div>
 
+            <!-- UDP Settings -->
             <div v-else-if="mode === 'UDP'" key="UDP" class="space-y-3">
               <div class="control-group"><label>Local Port</label><input type="text" v-model="udpLocalPort" class="morandi-input" placeholder="8081" :disabled="isConnected"></div>
               <div class="my-2 border-t border-black/5"></div>
@@ -326,7 +438,7 @@ const scrollToBottom = () => {
       </div>
     </div>
 
-    <!-- 右侧主区域 -->
+    <!-- 右侧主区域 (RX/TX) -->
     <div class="flex-1 flex flex-col min-w-0 p-4 gap-4 transition-colors duration-300">
       <div class="flex-1 bg-white/60 rounded-xl shadow-[0_2px_12px_-4px_rgba(0,0,0,0.08)] border border-black/5 flex flex-col overflow-hidden relative backdrop-blur-sm">
         <div class="h-10 px-4 flex items-center justify-between bg-black/[0.02] border-b border-black/5">
@@ -335,7 +447,7 @@ const scrollToBottom = () => {
             <span class="text-[10px] text-[var(--text-sub)] bg-black/5 px-1.5 py-0.5 rounded-md">{{ rxCount }} Bytes</span>
           </div>
           <button @click="clearReceive" title="清空" class="group flex items-center justify-center w-7 h-7 rounded hover:bg-white hover:shadow-sm text-[var(--text-sub)] hover:text-[var(--col-primary)] transition-all">
-            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L7.5 16.5"></path><path d="M19.5 4.5L16.5 7.5"></path><path d="M2 22L4.5 19.5"></path><path d="M9.5 12.5C7.5 14.5 6 15 5 16C4 17 3 17 3 17C3 17 3 18 4 19C5 20 5 20 5 20C5 20 6 20 7 19C8 18 8.5 16.5 10.5 14.5L18 7"></path></svg>
+            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L7.5 16.5"></path><path d="M19.5 4.5L16.5 7.5"></path><path d="M2 22L4.5 19.5"></path><path d="M9.5 12.5C7.5 14.5 6 15 5 16C4 17 3 17 3 17C3 18 4 19C5 20 5 20 5 20C5 20 6 20 7 19C8 18 8.5 16.5 10.5 14.5L18 7"></path></svg>
           </button>
         </div>
         <textarea ref="logWindowRef" readonly class="flex-1 w-full p-4 font-mono text-sm bg-transparent resize-none outline-none custom-scrollbar leading-relaxed text-[var(--text-main)]" :value="receivedData"></textarea>
@@ -345,16 +457,13 @@ const scrollToBottom = () => {
         <div class="h-9 px-4 flex items-center justify-between bg-black/[0.02] border-b border-black/5">
           <div class="flex items-center space-x-4">
             <span class="text-xs font-bold text-[var(--text-sub)] tracking-wider">TX EDITOR</span>
-
             <div class="flex items-center gap-3">
               <label class="flex items-center space-x-1.5 cursor-pointer hover:text-[var(--col-primary)] transition-colors select-none">
                 <input type="checkbox" v-model="hexSend" class="accent-[var(--col-primary)] w-3.5 h-3.5 rounded-sm">
                 <span class="text-[11px] font-bold opacity-70">Hex Send</span>
               </label>
-
               <div class="w-[1px] h-3 bg-black/10"></div>
-
-              <div class="relative z-10" :class="{'opacity-50 pointer-events-none': hexSend}" title="Hex Send 模式下禁用">
+              <div class="relative z-10" :class="{'opacity-50 pointer-events-none': hexSend}">
                 <button
                     @click="showEolDropdown = !showEolDropdown"
                     class="flex items-center space-x-1.5 bg-black/5 hover:bg-black/10 transition-all px-2.5 rounded-md border border-transparent focus:border-black/5 outline-none h-7"
@@ -366,18 +475,10 @@ const scrollToBottom = () => {
                   </div>
                   <svg class="w-3 h-3 opacity-50 transform transition-transform duration-200" :class="{'rotate-180': showEolDropdown}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
                 </button>
-
                 <div v-if="showEolDropdown" @click="showEolDropdown = false" class="fixed inset-0 z-0 cursor-default"></div>
-
                 <Transition name="slide-fade">
                   <div v-if="showEolDropdown" class="absolute top-full right-0 mt-1.5 w-32 bg-white/80 backdrop-blur-xl shadow-[0_4px_16px_-4px_rgba(0,0,0,0.1)] border border-white/50 rounded-lg p-1 z-50 flex flex-col overflow-hidden select-none ring-1 ring-black/5">
-                    <button
-                        v-for="opt in eolOptions"
-                        :key="opt.value"
-                        @click="selectEol(opt.value as any)"
-                        class="relative flex items-center justify-between w-full px-3 py-2 text-[11px] font-mono rounded-md transition-all outline-none"
-                        :class="lineEndingMode === opt.value ? 'bg-[var(--col-primary)] text-white shadow-sm font-medium' : 'text-[var(--text-main)] hover:bg-black/5'"
-                    >
+                    <button v-for="opt in eolOptions" :key="opt.value" @click="selectEol(opt.value as any)" class="relative flex items-center justify-between w-full px-3 py-2 text-[11px] font-mono rounded-md transition-all outline-none" :class="lineEndingMode === opt.value ? 'bg-[var(--col-primary)] text-white shadow-sm font-medium' : 'text-[var(--text-main)] hover:bg-black/5'">
                       <span>{{ opt.label }}</span>
                       <span v-if="lineEndingMode === opt.value" class="text-[10px] font-bold">✓</span>
                     </button>
@@ -385,14 +486,11 @@ const scrollToBottom = () => {
                 </Transition>
               </div>
             </div>
-
           </div>
         </div>
 
         <div class="flex-1 flex p-3 gap-3">
-          <textarea v-model="sendInput" class="flex-1 bg-white/50 border border-transparent focus:border-[var(--col-primary)]/30 rounded-lg p-3 font-mono text-sm text-[var(--text-main)] focus:bg-white transition-all outline-none resize-none placeholder-[var(--text-sub)]/50"
-                    :placeholder="hexSend ? 'Input Hex (e.g., AA BB CC)...' : 'Input data to send...'"
-                    @keydown.enter.ctrl.prevent="handleSend"></textarea>
+          <textarea v-model="sendInput" class="flex-1 bg-white/50 border border-transparent focus:border-[var(--col-primary)]/30 rounded-lg p-3 font-mono text-sm text-[var(--text-main)] focus:bg-white transition-all outline-none resize-none placeholder-[var(--text-sub)]/50" :placeholder="hexSend ? 'Input Hex (e.g., AA BB CC)...' : 'Input data to send...'" @keydown.enter.ctrl.prevent="handleSend"></textarea>
           <div class="flex flex-col gap-2 w-20">
             <button @click="handleSend" class="flex-1 bg-[var(--col-primary)] hover:opacity-90 text-white rounded-lg shadow-sm transition-all flex flex-col items-center justify-center active:scale-95"><span class="text-xs font-bold tracking-widest">SEND</span></button>
             <button @click="sendInput=''" class="h-8 bg-black/5 text-[var(--text-sub)] hover:bg-black/10 rounded-lg text-xs">CLR</button>
@@ -404,40 +502,17 @@ const scrollToBottom = () => {
     <!-- 自定义弹窗 (Modal) -->
     <Transition name="modal-fade">
       <div v-if="modal.show" class="fixed inset-0 z-50 flex items-center justify-center bg-black/20 backdrop-blur-[2px] transition-all">
-        <!-- 弹窗内容 -->
-        <div class="bg-white/95 rounded-xl shadow-2xl border border-white/50 w-[420px] max-w-[90%] overflow-hidden transform transition-all scale-100 flex flex-col"
-             @click.stop>
-
-          <!-- 标题栏 -->
+        <div class="bg-white/95 rounded-xl shadow-2xl border border-white/50 w-[420px] max-w-[90%] overflow-hidden transform transition-all scale-100 flex flex-col" @click.stop>
           <div class="h-10 flex items-center justify-between px-4 bg-black/[0.03] border-b border-black/5">
             <div class="flex items-center gap-2">
-              <!-- Error Icon -->
               <svg v-if="modal.type === 'error'" class="w-4 h-4 text-[var(--col-error)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
-              <!-- Info/Success Icon -->
               <svg v-else class="w-4 h-4 text-[var(--col-primary)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
-
-              <span class="text-xs font-bold tracking-wide" :class="modal.type === 'error' ? 'text-[var(--col-error)]' : 'text-[var(--col-primary)]'">
-                {{ modal.title }}
-              </span>
+              <span class="text-xs font-bold tracking-wide" :class="modal.type === 'error' ? 'text-[var(--col-error)]' : 'text-[var(--col-primary)]'">{{ modal.title }}</span>
             </div>
-            <button @click="closeModal" class="text-[var(--text-sub)] hover:text-[var(--text-main)] transition-colors">
-              <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-            </button>
+            <button @click="closeModal" class="text-[var(--text-sub)] hover:text-[var(--text-main)] transition-colors"><svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></button>
           </div>
-
-          <!-- 内容区域 -->
-          <div class="p-5">
-            <p class="text-sm text-[var(--text-main)] leading-relaxed font-medium mb-1 opacity-90 break-words font-mono bg-black/5 p-3 rounded-lg border border-black/5 text-[11px] max-h-40 overflow-y-auto custom-scrollbar">
-              {{ modal.message }}
-            </p>
-          </div>
-
-          <!-- 底部按钮 -->
-          <div class="px-5 pb-5 flex justify-end">
-            <button @click="closeModal" class="bg-[var(--col-primary)] text-white text-xs font-bold px-6 py-2 rounded-lg hover:opacity-90 active:scale-95 transition-all shadow-sm">
-              确 定
-            </button>
-          </div>
+          <div class="p-5"><p class="text-sm text-[var(--text-main)] leading-relaxed font-medium mb-1 opacity-90 break-words font-mono bg-black/5 p-3 rounded-lg border border-black/5 text-[11px] max-h-40 overflow-y-auto custom-scrollbar">{{ modal.message }}</p></div>
+          <div class="px-5 pb-5 flex justify-end"><button @click="closeModal" class="bg-[var(--col-primary)] text-white text-xs font-bold px-6 py-2 rounded-lg hover:opacity-90 active:scale-95 transition-all shadow-sm">确 定</button></div>
         </div>
       </div>
     </Transition>
@@ -457,51 +532,38 @@ const scrollToBottom = () => {
 .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: var(--col-primary); }
 
 .fade-enter-active,
-.fade-leave-active {
-  transition: opacity 0.2s ease, transform 0.2s ease;
-}
-
+.fade-leave-active { transition: opacity 0.2s ease, transform 0.2s ease; }
 .fade-enter-from,
-.fade-leave-to {
-  opacity: 0;
-  transform: translateY(5px);
-}
+.fade-leave-to { opacity: 0; transform: translateY(5px); }
 
-.slide-fade-enter-active {
-  transition: all 0.2s ease-out;
-}
-.slide-fade-leave-active {
-  transition: all 0.15s cubic-bezier(1, 0.5, 0.8, 1);
-}
+.slide-fade-enter-active { transition: all 0.2s ease-out; }
+.slide-fade-leave-active { transition: all 0.15s cubic-bezier(1, 0.5, 0.8, 1); }
 .slide-fade-enter-from,
-.slide-fade-leave-to {
-  transform: translateY(-5px);
-  opacity: 0;
-}
+.slide-fade-leave-to { transform: translateY(-5px); opacity: 0; }
 
-/* Modal Animation */
+/* 主题面板下拉动画 */
+.slide-down-enter-active { transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1); }
+.slide-down-leave-active { transition: all 0.2s ease-in; }
+.slide-down-enter-from,
+.slide-down-leave-to { transform: translateY(-10px); opacity: 0; }
+
+/* 汉堡菜单下拉动画 */
+.dropdown-fade-enter-active { transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1); }
+.dropdown-fade-leave-active { transition: all 0.15s ease-in; }
+.dropdown-fade-enter-from,
+.dropdown-fade-leave-to { transform: scale(0.95) translateY(-5px); opacity: 0; }
+
 .modal-fade-enter-active,
-.modal-fade-leave-active {
-  transition: all 0.2s ease-out;
-}
+.modal-fade-leave-active { transition: all 0.2s ease-out; }
 .modal-fade-enter-from,
-.modal-fade-leave-to {
-  opacity: 0;
-}
+.modal-fade-leave-to { opacity: 0; }
 .modal-fade-enter-from .bg-white\/95,
-.modal-fade-leave-to .bg-white\/95 {
-  transform: scale(0.95);
-  opacity: 0;
-}
+.modal-fade-leave-to .bg-white\/95 { transform: scale(0.95); opacity: 0; }
 
 @keyframes shake-x {
   0%, 100% { transform: translateX(0); }
   10%, 30%, 50%, 70%, 90% { transform: translateX(-4px); }
   20%, 40%, 60%, 80% { transform: translateX(4px); }
 }
-
-.shake-anim {
-  animation: shake-x 0.4s cubic-bezier(0.36, 0.07, 0.19, 0.97) both;
-  border-color: rgba(239, 68, 68, 0.5);
-}
+.shake-anim { animation: shake-x 0.4s cubic-bezier(0.36, 0.07, 0.19, 0.97) both; border-color: rgba(239, 68, 68, 0.5); }
 </style>

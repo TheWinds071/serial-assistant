@@ -5,6 +5,8 @@ export function Close():Promise<string>;
 
 export function GetSerialPorts():Promise<Array<string>>;
 
+export function OpenJLink(arg1:string,arg2:number,arg3:string):Promise<string>;
+
 export function OpenSerial(arg1:string,arg2:number,arg3:number,arg4:number,arg5:string):Promise<string>;
 
 export function OpenTcpClient(arg1:string,arg2:string):Promise<string>;
