@@ -15,6 +15,8 @@ import (
 const (
 	GitHubRepo   = "TheWinds071/serial-mate"
 	CheckTimeout = 10 * time.Second
+	// OldExeCleanupDelay is the delay before cleaning up the old executable after update
+	OldExeCleanupDelay = 5 * time.Second
 )
 
 // Release represents a GitHub release
@@ -183,7 +185,7 @@ func InstallUpdate(updateFile string) error {
 
 		// Clean up old executable in background (ignore errors)
 		go func() {
-			time.Sleep(5 * time.Second)
+			time.Sleep(OldExeCleanupDelay)
 			os.Remove(oldPath)
 		}()
 	} else {
@@ -240,8 +242,9 @@ func compareVersions(v1, v2 string) int {
 
 	for i := 0; i < maxLen; i++ {
 		var n1, n2 int
-		fmt.Sscanf(parts1[i], "%d", &n1)
-		fmt.Sscanf(parts2[i], "%d", &n2)
+		// Parse version parts, ignoring errors (defaults to 0 for invalid parts)
+		_, _ = fmt.Sscanf(parts1[i], "%d", &n1)
+		_, _ = fmt.Sscanf(parts2[i], "%d", &n2)
 
 		if n1 < n2 {
 			return -1

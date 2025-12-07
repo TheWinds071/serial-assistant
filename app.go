@@ -537,12 +537,11 @@ func (a *App) DownloadAndInstallUpdate(downloadURL string) error {
 	return nil
 }
 
-// RestartApp restarts the application
-func (a *App) RestartApp() {
+// QuitApp quits the application (user can manually restart it)
+func (a *App) QuitApp() {
 	// Close all connections first
 	a.Close()
 	
-	// Exit the application - user will need to restart manually
-	// On most systems, the OS will handle restarting if configured
+	// Quit the application
 	runtime.Quit(a.ctx)
 }

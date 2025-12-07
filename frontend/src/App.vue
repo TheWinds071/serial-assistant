@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, nextTick, watch, computed, reactive } from 'vue';
-// 引入后端方法 (新增 OpenJLink, GetVersion, CheckForUpdates, DownloadAndInstallUpdate, RestartApp)
-import { GetSerialPorts, OpenSerial, OpenTcpClient, OpenTcpServer, OpenUdp, OpenJLink, Close as CloseConnection, SendData, GetVersion, CheckForUpdates, DownloadAndInstallUpdate, RestartApp } from '../wailsjs/go/main/App';
+// 引入后端方法 (新增 OpenJLink, GetVersion, CheckForUpdates, DownloadAndInstallUpdate, QuitApp)
+import { GetSerialPorts, OpenSerial, OpenTcpClient, OpenTcpServer, OpenUdp, OpenJLink, Close as CloseConnection, SendData, GetVersion, CheckForUpdates, DownloadAndInstallUpdate, QuitApp } from '../wailsjs/go/main/App';
 import { EventsOn } from '../wailsjs/runtime/runtime';
 
 // --- 1. 核心状态 ---
@@ -206,10 +206,8 @@ const downloadAndInstall = async () => {
   
   try {
     await DownloadAndInstallUpdate(updateInfo.downloadUrl);
-    showModal('更新成功', '应用将在3秒后重启...', 'success');
-    setTimeout(() => {
-      RestartApp();
-    }, 3000);
+    showModal('更新成功', '请手动重启应用以使用新版本。', 'success');
+    updateProgress.downloading = false;
   } catch (error) {
     updateProgress.downloading = false;
     showModal('更新失败', String(error), 'error');

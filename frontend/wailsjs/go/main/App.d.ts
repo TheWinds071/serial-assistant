@@ -22,6 +22,6 @@ export function OpenTcpServer(arg1:string):Promise<string>;
 
 export function OpenUdp(arg1:string,arg2:string,arg3:string):Promise<string>;
 
-export function RestartApp():Promise<void>;
+export function QuitApp():Promise<void>;
 
 export function SendData(arg1:string):Promise<string>;
