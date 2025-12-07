@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
 	"sync"
 	"time"
 
-	"serial-assistant/pkg/jlink" // 引入刚才创建的包
+	"serial-assistant/pkg/jlink"   // 引入刚才创建的包
+	"serial-assistant/pkg/updater" // 引入更新模块
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 	"go.bug.st/serial"
@@ -490,4 +492,56 @@ func (a *App) SendData(data string) string {
 		return fmt.Sprintf("Send error: %v", err)
 	}
 	return "Sent"
+}
+
+// --- Update Methods ---
+
+// GetVersion returns the current application version
+func (a *App) GetVersion() string {
+	return Version
+}
+
+// CheckForUpdates checks if a new version is available
+func (a *App) CheckForUpdates() (updater.UpdateInfo, error) {
+	info, err := updater.CheckForUpdates(Version)
+	if err != nil {
+		return updater.UpdateInfo{}, err
+	}
+	return *info, nil
+}
+
+// DownloadAndInstallUpdate downloads and installs the update
+func (a *App) DownloadAndInstallUpdate(downloadURL string) error {
+	// Download with progress reporting
+	tempFile, err := updater.DownloadUpdate(downloadURL, func(downloaded, total int64) {
+		// Emit progress event to frontend
+		progress := float64(downloaded) / float64(total) * 100
+		runtime.EventsEmit(a.ctx, "update-progress", map[string]interface{}{
+			"downloaded": downloaded,
+			"total":      total,
+			"progress":   progress,
+		})
+	})
+	if err != nil {
+		return fmt.Errorf("download failed: %w", err)
+	}
+
+	// Install the update
+	if err := updater.InstallUpdate(tempFile); err != nil {
+		return fmt.Errorf("installation failed: %w", err)
+	}
+
+	// Clean up temp file
+	os.Remove(tempFile)
+
+	return nil
+}
+
+// QuitApp quits the application (user can manually restart it)
+func (a *App) QuitApp() {
+	// Close all connections first
+	a.Close()
+	
+	// Quit the application
+	runtime.Quit(a.ctx)
 }

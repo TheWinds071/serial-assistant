@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, nextTick, watch, computed, reactive } from 'vue';
-// 引入后端方法 (新增 OpenJLink)
-import { GetSerialPorts, OpenSerial, OpenTcpClient, OpenTcpServer, OpenUdp, OpenJLink, Close as CloseConnection, SendData } from '../wailsjs/go/main/App';
+// 引入后端方法 (新增 OpenJLink, GetVersion, CheckForUpdates, DownloadAndInstallUpdate, QuitApp)
+import { GetSerialPorts, OpenSerial, OpenTcpClient, OpenTcpServer, OpenUdp, OpenJLink, Close as CloseConnection, SendData, GetVersion, CheckForUpdates, DownloadAndInstallUpdate, QuitApp } from '../wailsjs/go/main/App';
 import { EventsOn } from '../wailsjs/runtime/runtime';
 
 // --- 1. 核心状态 ---
@@ -161,8 +161,63 @@ const closeModal = () => {
   modal.show = false;
 };
 
+// --- Update 相关状态 ---
+const showAboutPanel = ref(false);
+const appVersion = ref('');
+const updateInfo = reactive({
+  checking: false,
+  available: false,
+  currentVersion: '',
+  latestVersion: '',
+  releaseNotes: '',
+  downloadUrl: '',
+  assetSize: 0
+});
+const updateProgress = reactive({
+  downloading: false,
+  progress: 0,
+  downloaded: 0,
+  total: 0
+});
+
+const checkForUpdates = async () => {
+  updateInfo.checking = true;
+  try {
+    const info = await CheckForUpdates();
+    Object.assign(updateInfo, info);
+    updateInfo.checking = false;
+    
+    if (info.available) {
+      showModal('发现新版本', `当前版本: ${info.currentVersion}\n最新版本: ${info.latestVersion}\n\n点击"关于"面板中的"立即更新"按钮进行更新。`, 'info');
+    } else {
+      showModal('已是最新版本', `当前版本: ${info.currentVersion}`, 'success');
+    }
+  } catch (error) {
+    updateInfo.checking = false;
+    showModal('检查更新失败', String(error), 'error');
+  }
+};
+
+const downloadAndInstall = async () => {
+  if (!updateInfo.downloadUrl) return;
+  
+  updateProgress.downloading = true;
+  updateProgress.progress = 0;
+  
+  try {
+    await DownloadAndInstallUpdate(updateInfo.downloadUrl);
+    showModal('更新成功', '请手动重启应用以使用新版本。', 'success');
+    updateProgress.downloading = false;
+  } catch (error) {
+    updateProgress.downloading = false;
+    showModal('更新失败', String(error), 'error');
+  }
+};
+
 // --- 4. 生命周期 ---
 onMounted(async () => {
+  // 获取当前版本
+  appVersion.value = await GetVersion();
   await refreshPorts();
 
   // 数据接收监听
@@ -195,6 +250,12 @@ onMounted(async () => {
 
   EventsOn("sys-msg", (msg) => {
     console.log("Sys Msg:", msg);
+  });
+
+  EventsOn("update-progress", (data: any) => {
+    updateProgress.downloaded = data.downloaded;
+    updateProgress.total = data.total;
+    updateProgress.progress = data.progress;
   });
 });
 
@@ -340,9 +401,14 @@ const scrollToBottom = () => {
     <div class="w-72 bg-[var(--bg-side)] flex flex-col shrink-0 border-r border-black/5 transition-colors duration-300 relative">
       <div class="h-14 flex items-center justify-between px-4 border-b border-black/5">
         <span class="font-bold text-lg tracking-widest text-[var(--col-primary)]">SERIAL MATE</span>
-        <button @click="showThemePanel = !showThemePanel" class="p-1.5 rounded-md hover:bg-black/5 text-[var(--text-sub)] transition-colors" :class="{'bg-black/5': showThemePanel}">
-          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="13.5" cy="6.5" r=".5"></circle><circle cx="17.5" cy="10.5" r=".5"></circle><circle cx="8.5" cy="7.5" r=".5"></circle><circle cx="6.5" cy="12.5" r=".5"></circle><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z"></path></svg>
-        </button>
+        <div class="flex items-center gap-2">
+          <button @click="showAboutPanel = !showAboutPanel" class="p-1.5 rounded-md hover:bg-black/5 text-[var(--text-sub)] transition-colors" :class="{'bg-black/5': showAboutPanel}" title="关于与更新">
+            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+          </button>
+          <button @click="showThemePanel = !showThemePanel" class="p-1.5 rounded-md hover:bg-black/5 text-[var(--text-sub)] transition-colors" :class="{'bg-black/5': showThemePanel}" title="主题设置">
+            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="13.5" cy="6.5" r=".5"></circle><circle cx="17.5" cy="10.5" r=".5"></circle><circle cx="8.5" cy="7.5" r=".5"></circle><circle cx="6.5" cy="12.5" r=".5"></circle><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z"></path></svg>
+          </button>
+        </div>
       </div>
 
       <!-- 主题面板 (已修复：添加了颜色输入控件) -->
@@ -359,6 +425,58 @@ const scrollToBottom = () => {
               <div class="flex items-center gap-2 bg-black/5 rounded p-1 pl-2">
                 <input type="color" v-model="theme[key as keyof ThemeType]" class="w-5 h-5 rounded cursor-pointer border-none bg-transparent p-0 shrink-0">
                 <input type="text" v-model="theme[key as keyof ThemeType]" class="w-full bg-transparent border-none text-[10px] font-mono text-[var(--text-main)] focus:outline-none uppercase">
+              </div>
+            </div>
+          </div>
+        </div>
+      </Transition>
+
+      <!-- 关于与更新面板 -->
+      <Transition name="slide-down">
+        <div v-if="showAboutPanel" class="absolute top-14 left-0 w-full bg-white/95 backdrop-blur-md p-4 shadow-xl border-b border-black/5 z-20 flex flex-col gap-3">
+          <div class="flex justify-between items-center text-xs font-bold text-[var(--text-sub)] mb-1">
+            <span>关于 Serial Mate</span>
+            <button @click="showAboutPanel = false" class="hover:text-[var(--col-primary)] transition-colors">关闭</button>
+          </div>
+
+          <div class="flex flex-col gap-2">
+            <div class="text-xs text-[var(--text-main)]">
+              <div class="flex justify-between py-1">
+                <span class="text-[var(--text-sub)]">当前版本:</span>
+                <span class="font-mono font-bold">{{ appVersion }}</span>
+              </div>
+            </div>
+
+            <div class="flex gap-2 mt-2">
+              <button @click="checkForUpdates" 
+                      :disabled="updateInfo.checking"
+                      class="flex-1 py-2 px-3 rounded text-xs font-bold transition-all disabled:opacity-50"
+                      :class="updateInfo.checking ? 'bg-black/5 text-[var(--text-sub)]' : 'bg-[var(--col-primary)] text-white hover:opacity-90'">
+                {{ updateInfo.checking ? '检查中...' : '检查更新' }}
+              </button>
+            </div>
+
+            <div v-if="updateInfo.available" class="mt-2 p-3 bg-[var(--col-primary)]/10 rounded text-xs">
+              <div class="font-bold text-[var(--col-primary)] mb-2">
+                🎉 发现新版本: {{ updateInfo.latestVersion }}
+              </div>
+              <div class="text-[var(--text-sub)] mb-2 max-h-24 overflow-y-auto text-[10px] whitespace-pre-wrap">
+                {{ updateInfo.releaseNotes }}
+              </div>
+              <button @click="downloadAndInstall" 
+                      :disabled="updateProgress.downloading"
+                      class="w-full py-2 px-3 rounded text-xs font-bold bg-[var(--col-primary)] text-white hover:opacity-90 transition-all disabled:opacity-50">
+                {{ updateProgress.downloading ? '下载中...' : '立即更新' }}
+              </button>
+              
+              <div v-if="updateProgress.downloading" class="mt-2">
+                <div class="flex justify-between text-[10px] text-[var(--text-sub)] mb-1">
+                  <span>{{ (updateProgress.downloaded / 1024 / 1024).toFixed(2) }} MB / {{ (updateProgress.total / 1024 / 1024).toFixed(2) }} MB</span>
+                  <span>{{ updateProgress.progress.toFixed(0) }}%</span>
+                </div>
+                <div class="w-full h-1.5 bg-black/10 rounded-full overflow-hidden">
+                  <div class="h-full bg-[var(--col-primary)] transition-all duration-300" :style="{ width: updateProgress.progress + '%' }"></div>
+                </div>
               </div>
             </div>
           </div>
