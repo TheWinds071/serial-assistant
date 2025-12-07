@@ -73,6 +73,24 @@ const selectEol = (val: 'NONE' | 'LF' | 'CRLF') => {
   showEolDropdown.value = false;
 };
 
+// 自定义下拉框状态管理
+const showPortDropdown = ref(false);
+const showDataBitsDropdown = ref(false);
+const showParityDropdown = ref(false);
+const showStopBitsDropdown = ref(false);
+const showJlinkInterfaceDropdown = ref(false);
+
+const dataBitsOptions = [8, 7, 6, 5];
+const parityOptions = [
+  { label: 'None', value: 'None' },
+  { label: 'Odd', value: 'Odd' },
+  { label: 'Even', value: 'Even' },
+  { label: 'Mark', value: 'Mark' },
+  { label: 'Space', value: 'Space' }
+];
+const stopBitsOptions = [1, 1.5, 2];
+const jlinkInterfaceOptions = ['SWD', 'JTAG'];
+
 const autoScroll = ref(true);
 const logWindowRef = ref<HTMLElement | null>(null);
 const rxCount = ref(0);
@@ -409,17 +427,143 @@ const scrollToBottom = () => {
           <Transition name="fade" mode="out-in">
             <!-- Serial Settings -->
             <div v-if="mode === 'SERIAL'" key="SERIAL" class="space-y-3">
-              <div class="control-group"><label>端口</label><div class="relative flex-1"><select v-model="selectedPort" @click="refreshPorts" class="morandi-input" :disabled="isConnected"><option v-for="p in portList" :key="p" :value="p">{{ p }}</option></select></div></div>
-              <div class="control-group"><label>波特率</label><div class="relative flex-1"><input type="number" v-model="baudRate" list="baud-list" class="morandi-input" placeholder="Custom" :disabled="isConnected"><datalist id="baud-list"><option v-for="b in baudOptions" :key="b" :value="b"></option></datalist></div></div>
-              <div class="control-group"><label>数据位</label><select v-model="dataBits" class="morandi-input flex-1" :disabled="isConnected"><option value="8">8</option><option value="7">7</option><option value="6">6</option><option value="5">5</option></select></div>
-              <div class="control-group"><label>校验位</label><select v-model="parity" class="morandi-input flex-1" :disabled="isConnected"><option value="None">None</option><option value="Odd">Odd</option><option value="Even">Even</option><option value="Mark">Mark</option><option value="Space">Space</option></select></div>
-              <div class="control-group"><label>停止位</label><select v-model="stopBits" class="morandi-input flex-1" :disabled="isConnected"><option value="1">1</option><option value="1.5">1.5</option><option value="2">2</option></select></div>
+              <!-- 端口 Port -->
+              <div class="control-group">
+                <label>端口</label>
+                <div class="relative flex-1">
+                  <button
+                      @click="!isConnected && (refreshPorts(), showPortDropdown = !showPortDropdown)"
+                      class="w-full morandi-input text-left flex items-center justify-between"
+                      :class="{'opacity-60 cursor-not-allowed': isConnected}"
+                  >
+                    <span>{{ selectedPort || '选择端口' }}</span>
+                    <svg class="w-3 h-3 opacity-50 transition-transform duration-200 shrink-0" :class="{'rotate-180': showPortDropdown}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                  </button>
+                  <div v-if="showPortDropdown && !isConnected" @click="showPortDropdown = false" class="fixed inset-0 z-0 cursor-default"></div>
+                  <Transition name="slide-fade">
+                    <div v-if="showPortDropdown && !isConnected" class="absolute top-full left-0 right-0 mt-1 bg-white/95 backdrop-blur-xl shadow-lg border border-white/50 rounded-lg p-1 z-50 flex flex-col max-h-48 overflow-y-auto custom-scrollbar ring-1 ring-black/5">
+                      <button v-for="p in portList" :key="p" @click="selectedPort = p; showPortDropdown = false" class="flex items-center justify-between w-full px-3 py-2 text-xs rounded-md transition-all text-left" :class="selectedPort === p ? 'bg-[var(--col-primary)] text-white shadow-sm font-medium' : 'text-[var(--text-main)] hover:bg-black/5'">
+                        <span>{{ p }}</span>
+                        <span v-if="selectedPort === p" class="text-[10px] font-bold">✓</span>
+                      </button>
+                      <div v-if="portList.length === 0" class="px-3 py-2 text-xs text-[var(--text-sub)] text-center">无可用端口</div>
+                    </div>
+                  </Transition>
+                </div>
+              </div>
+
+              <!-- 波特率 Baud Rate -->
+              <div class="control-group">
+                <label>波特率</label>
+                <div class="relative flex-1">
+                  <input type="number" v-model="baudRate" list="baud-list" class="morandi-input" placeholder="Custom" :disabled="isConnected">
+                  <datalist id="baud-list">
+                    <option v-for="b in baudOptions" :key="b" :value="b"></option>
+                  </datalist>
+                </div>
+              </div>
+
+              <!-- 数据位 Data Bits -->
+              <div class="control-group">
+                <label>数据位</label>
+                <div class="relative flex-1">
+                  <button
+                      @click="!isConnected && (showDataBitsDropdown = !showDataBitsDropdown)"
+                      class="w-full morandi-input text-left flex items-center justify-between"
+                      :class="{'opacity-60 cursor-not-allowed': isConnected}"
+                  >
+                    <span>{{ dataBits }}</span>
+                    <svg class="w-3 h-3 opacity-50 transition-transform duration-200 shrink-0" :class="{'rotate-180': showDataBitsDropdown}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                  </button>
+                  <div v-if="showDataBitsDropdown && !isConnected" @click="showDataBitsDropdown = false" class="fixed inset-0 z-0 cursor-default"></div>
+                  <Transition name="slide-fade">
+                    <div v-if="showDataBitsDropdown && !isConnected" class="absolute top-full left-0 right-0 mt-1 bg-white/95 backdrop-blur-xl shadow-lg border border-white/50 rounded-lg p-1 z-50 flex flex-col ring-1 ring-black/5">
+                      <button v-for="opt in dataBitsOptions" :key="opt" @click="dataBits = opt; showDataBitsDropdown = false" class="flex items-center justify-between w-full px-3 py-2 text-xs rounded-md transition-all text-left" :class="dataBits === opt ? 'bg-[var(--col-primary)] text-white shadow-sm font-medium' : 'text-[var(--text-main)] hover:bg-black/5'">
+                        <span>{{ opt }}</span>
+                        <span v-if="dataBits === opt" class="text-[10px] font-bold">✓</span>
+                      </button>
+                    </div>
+                  </Transition>
+                </div>
+              </div>
+
+              <!-- 校验位 Parity -->
+              <div class="control-group">
+                <label>校验位</label>
+                <div class="relative flex-1">
+                  <button
+                      @click="!isConnected && (showParityDropdown = !showParityDropdown)"
+                      class="w-full morandi-input text-left flex items-center justify-between"
+                      :class="{'opacity-60 cursor-not-allowed': isConnected}"
+                  >
+                    <span>{{ parity }}</span>
+                    <svg class="w-3 h-3 opacity-50 transition-transform duration-200 shrink-0" :class="{'rotate-180': showParityDropdown}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                  </button>
+                  <div v-if="showParityDropdown && !isConnected" @click="showParityDropdown = false" class="fixed inset-0 z-0 cursor-default"></div>
+                  <Transition name="slide-fade">
+                    <div v-if="showParityDropdown && !isConnected" class="absolute top-full left-0 right-0 mt-1 bg-white/95 backdrop-blur-xl shadow-lg border border-white/50 rounded-lg p-1 z-50 flex flex-col ring-1 ring-black/5">
+                      <button v-for="opt in parityOptions" :key="opt.value" @click="parity = opt.value; showParityDropdown = false" class="flex items-center justify-between w-full px-3 py-2 text-xs rounded-md transition-all text-left" :class="parity === opt.value ? 'bg-[var(--col-primary)] text-white shadow-sm font-medium' : 'text-[var(--text-main)] hover:bg-black/5'">
+                        <span>{{ opt.label }}</span>
+                        <span v-if="parity === opt.value" class="text-[10px] font-bold">✓</span>
+                      </button>
+                    </div>
+                  </Transition>
+                </div>
+              </div>
+
+              <!-- 停止位 Stop Bits -->
+              <div class="control-group">
+                <label>停止位</label>
+                <div class="relative flex-1">
+                  <button
+                      @click="!isConnected && (showStopBitsDropdown = !showStopBitsDropdown)"
+                      class="w-full morandi-input text-left flex items-center justify-between"
+                      :class="{'opacity-60 cursor-not-allowed': isConnected}"
+                  >
+                    <span>{{ stopBits }}</span>
+                    <svg class="w-3 h-3 opacity-50 transition-transform duration-200 shrink-0" :class="{'rotate-180': showStopBitsDropdown}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                  </button>
+                  <div v-if="showStopBitsDropdown && !isConnected" @click="showStopBitsDropdown = false" class="fixed inset-0 z-0 cursor-default"></div>
+                  <Transition name="slide-fade">
+                    <div v-if="showStopBitsDropdown && !isConnected" class="absolute top-full left-0 right-0 mt-1 bg-white/95 backdrop-blur-xl shadow-lg border border-white/50 rounded-lg p-1 z-50 flex flex-col ring-1 ring-black/5">
+                      <button v-for="opt in stopBitsOptions" :key="opt" @click="stopBits = opt; showStopBitsDropdown = false" class="flex items-center justify-between w-full px-3 py-2 text-xs rounded-md transition-all text-left" :class="stopBits === opt ? 'bg-[var(--col-primary)] text-white shadow-sm font-medium' : 'text-[var(--text-main)] hover:bg-black/5'">
+                        <span>{{ opt }}</span>
+                        <span v-if="stopBits === opt" class="text-[10px] font-bold">✓</span>
+                      </button>
+                    </div>
+                  </Transition>
+                </div>
+              </div>
             </div>
 
             <!-- J-LINK Settings -->
             <div v-else-if="mode === 'JLINK'" key="JLINK" class="space-y-3">
               <div class="control-group"><label>Chip</label><input type="text" v-model="jlinkChip" class="morandi-input" placeholder="e.g. STM32F407VE" :disabled="isConnected"></div>
-              <div class="control-group"><label>Interface</label><select v-model="jlinkInterface" class="morandi-input flex-1" :disabled="isConnected"><option value="SWD">SWD</option><option value="JTAG">JTAG</option></select></div>
+              
+              <!-- Interface -->
+              <div class="control-group">
+                <label>Interface</label>
+                <div class="relative flex-1">
+                  <button
+                      @click="!isConnected && (showJlinkInterfaceDropdown = !showJlinkInterfaceDropdown)"
+                      class="w-full morandi-input text-left flex items-center justify-between"
+                      :class="{'opacity-60 cursor-not-allowed': isConnected}"
+                  >
+                    <span>{{ jlinkInterface }}</span>
+                    <svg class="w-3 h-3 opacity-50 transition-transform duration-200 shrink-0" :class="{'rotate-180': showJlinkInterfaceDropdown}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                  </button>
+                  <div v-if="showJlinkInterfaceDropdown && !isConnected" @click="showJlinkInterfaceDropdown = false" class="fixed inset-0 z-0 cursor-default"></div>
+                  <Transition name="slide-fade">
+                    <div v-if="showJlinkInterfaceDropdown && !isConnected" class="absolute top-full left-0 right-0 mt-1 bg-white/95 backdrop-blur-xl shadow-lg border border-white/50 rounded-lg p-1 z-50 flex flex-col ring-1 ring-black/5">
+                      <button v-for="opt in jlinkInterfaceOptions" :key="opt" @click="jlinkInterface = opt; showJlinkInterfaceDropdown = false" class="flex items-center justify-between w-full px-3 py-2 text-xs rounded-md transition-all text-left" :class="jlinkInterface === opt ? 'bg-[var(--col-primary)] text-white shadow-sm font-medium' : 'text-[var(--text-main)] hover:bg-black/5'">
+                        <span>{{ opt }}</span>
+                        <span v-if="jlinkInterface === opt" class="text-[10px] font-bold">✓</span>
+                      </button>
+                    </div>
+                  </Transition>
+                </div>
+              </div>
+              
               <div class="control-group"><label>Speed</label><input type="number" v-model="jlinkSpeed" class="morandi-input" placeholder="4000" :disabled="isConnected"></div>
             </div>
 
