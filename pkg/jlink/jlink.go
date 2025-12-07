@@ -56,10 +56,12 @@ func NewJLinkWrapper() (*JLinkWrapper, error) {
 
 	fmt.Printf("[JLink] Loading library: %s\n", libPath)
 
-	// 调用平台特定的加载函数 (定义在 loader_windows.go 或 loader_unix.go)
+	// [修复关键点]
+	// 这里直接调用我们自己在 loader_*.go 中定义的 openLibrary
+	// 不再直接调用 purego.Dlopen，从而避免了 Windows 下的 undefined 错误
 	lib, err := openLibrary(libPath)
 	if err != nil {
-		// Linux 下的备用路径尝试逻辑
+		// Linux 备用路径逻辑也改用 openLibrary
 		if runtime.GOOS == "linux" && libPath == "./libjlinkarm.so" {
 			fmt.Println("[JLink] Local load failed, trying /opt/SEGGER/JLink/libjlinkarm.so")
 			lib, err = openLibrary("/opt/SEGGER/JLink/libjlinkarm.so")
@@ -71,7 +73,7 @@ func NewJLinkWrapper() (*JLinkWrapper, error) {
 
 	jl := &JLinkWrapper{libHandle: lib}
 
-	// 注册函数
+	// 注册函数 - purego.RegisterLibFunc 是跨平台的，可以在这里安全使用
 	register := func(dest interface{}, name string) {
 		defer func() { recover() }()
 		purego.RegisterLibFunc(dest, lib, name)
@@ -183,7 +185,8 @@ func (jl *JLinkWrapper) Close() {
 	if jl.apiClose != nil {
 		jl.apiClose()
 	}
-	// 还可以调用 closeLibrary(jl.libHandle) 释放句柄
+	// 使用我们定义的 closeLibrary
+	closeLibrary(jl.libHandle)
 }
 
 // --- Soft RTT Logic ---
