@@ -4,6 +4,7 @@ package jlink
 
 import (
 	"fmt"
+
 	"github.com/ebitengine/purego"
 )
 
@@ -21,4 +22,9 @@ func openLibrary(name string) (uintptr, error) {
 
 func closeLibrary(handle uintptr) {
 	purego.Dlclose(handle)
+}
+
+// registerLibFunc wraps purego.RegisterLibFunc for cross-platform compatibility
+func registerLibFunc(fptr interface{}, handle uintptr, name string) {
+	purego.RegisterLibFunc(fptr, handle, name)
 }

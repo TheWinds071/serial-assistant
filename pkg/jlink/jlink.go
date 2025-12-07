@@ -8,8 +8,6 @@ import (
 	"runtime"
 	"time"
 	"unsafe"
-
-	"github.com/ebitengine/purego"
 )
 
 // JLinkWrapper 封装 J-Link API
@@ -73,10 +71,10 @@ func NewJLinkWrapper() (*JLinkWrapper, error) {
 
 	jl := &JLinkWrapper{libHandle: lib}
 
-	// 注册函数 - purego.RegisterLibFunc 是跨平台的，可以在这里安全使用
+	// 注册函数 - registerLibFunc 是跨平台的，可以在这里安全使用
 	register := func(dest interface{}, name string) {
 		defer func() { recover() }()
-		purego.RegisterLibFunc(dest, lib, name)
+		registerLibFunc(dest, lib, name)
 	}
 
 	register(&jl.apiOpen, "JLINK_Open")

@@ -5,6 +5,8 @@ package jlink
 import (
 	"fmt"
 	"syscall"
+
+	"github.com/ebitengine/purego"
 )
 
 func openLibrary(name string) (uintptr, error) {
@@ -18,4 +20,9 @@ func openLibrary(name string) (uintptr, error) {
 
 func closeLibrary(handle uintptr) {
 	syscall.FreeLibrary(syscall.Handle(handle))
+}
+
+// registerLibFunc wraps purego.RegisterLibFunc for cross-platform compatibility
+func registerLibFunc(fptr interface{}, handle uintptr, name string) {
+	purego.RegisterLibFunc(fptr, handle, name)
 }
