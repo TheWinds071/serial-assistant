@@ -138,8 +138,15 @@ func (a *App) OpenJLink(chip string, speed int, iface string) string {
 		return "Already connected"
 	}
 
+	// 定义日志回调函数，将日志发送到前端 RX Monitor
+	logCallback := func(message string) {
+		// 将日志消息作为字符串发送到前端
+		logData := []byte(message + "\n")
+		runtime.EventsEmit(a.ctx, "serial-data", logData)
+	}
+
 	// 1. 加载驱动
-	jl, err := jlink.NewJLinkWrapper()
+	jl, err := jlink.NewJLinkWrapper(logCallback)
 	if err != nil {
 		return err.Error()
 	}
