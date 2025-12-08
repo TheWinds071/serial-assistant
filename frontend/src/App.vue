@@ -9,8 +9,8 @@ const portList = ref<string[]>([]);
 const selectedPort = ref('');
 const isConnected = ref(false);
 
-// 模式选择 (新增 JLINK)
-type ConnectionMode = 'SERIAL' | 'TCP_CLIENT' | 'TCP_SERVER' | 'UDP' | 'JLINK';
+// 模式选择 (新增 RTT)
+type ConnectionMode = 'SERIAL' | 'TCP_CLIENT' | 'TCP_SERVER' | 'UDP' | 'RTT';
 const mode = ref<ConnectionMode>('SERIAL');
 const showMoreModes = ref(false); // 控制更多菜单显示
 
@@ -291,7 +291,7 @@ const toggleConnection = async () => {
     if (mode.value === 'SERIAL') {
       if (!selectedPort.value) return;
       res = await OpenSerial(selectedPort.value, Number(baudRate.value), Number(dataBits.value), Number(stopBits.value), parity.value);
-    } else if (mode.value === 'JLINK') {
+    } else if (mode.value === 'RTT') {
       if (!jlinkChip.value) return;
       res = await OpenJLink(jlinkChip.value, Number(jlinkSpeed.value), jlinkInterface.value);
     } else if (mode.value === 'TCP_CLIENT') {
@@ -492,9 +492,9 @@ const scrollToBottom = () => {
             <button @click="switchMode('SERIAL')"
                     :class="{'bg-white text-[var(--col-primary)] shadow-sm': mode==='SERIAL', 'text-[var(--text-sub)] hover:bg-black/5': mode!=='SERIAL'}"
                     class="flex-1 py-1.5 rounded transition-all">SERIAL</button>
-            <button @click="switchMode('JLINK')"
-                    :class="{'bg-white text-[var(--col-primary)] shadow-sm': mode==='JLINK', 'text-[var(--text-sub)] hover:bg-black/5': mode!=='JLINK'}"
-                    class="flex-1 py-1.5 rounded transition-all">J-LINK</button>
+            <button @click="switchMode('RTT')"
+                    :class="{'bg-white text-[var(--col-primary)] shadow-sm': mode==='RTT', 'text-[var(--text-sub)] hover:bg-black/5': mode!=='RTT'}"
+                    class="flex-1 py-1.5 rounded transition-all">RTT</button>
             <button @click="switchMode('TCP_CLIENT')"
                     :class="{'bg-white text-[var(--col-primary)] shadow-sm': mode==='TCP_CLIENT', 'text-[var(--text-sub)] hover:bg-black/5': mode!=='TCP_CLIENT'}"
                     class="flex-1 py-1.5 rounded transition-all">TCP-C</button>
@@ -504,7 +504,7 @@ const scrollToBottom = () => {
           <div class="relative">
             <button @click="showMoreModes = !showMoreModes"
                     class="h-full px-2.5 bg-white/40 hover:bg-white/60 rounded-lg shadow-sm border border-black/5 flex items-center justify-center text-[var(--text-sub)] transition-all z-50 relative"
-                    :class="{'bg-white text-[var(--col-primary)]': showMoreModes || (mode !== 'SERIAL' && mode !== 'JLINK' && mode !== 'TCP_CLIENT')}">
+                    :class="{'bg-white text-[var(--col-primary)]': showMoreModes || (mode !== 'SERIAL' && mode !== 'RTT' && mode !== 'TCP_CLIENT')}">
               <svg class="w-4 h-4 overflow-visible" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <line x1="3" y1="6" x2="21" y2="6" class="transition-all duration-300 origin-[12px_12px]" :class="showMoreModes ? 'translate-y-[6px] rotate-45' : ''"></line>
                 <line x1="3" y1="12" x2="21" y2="12" class="transition-all duration-300" :class="showMoreModes ? 'opacity-0' : ''"></line>
@@ -539,7 +539,7 @@ const scrollToBottom = () => {
         <div class="bg-white/40 p-3 rounded-lg shadow-sm border border-black/5 space-y-3 overflow-visible">
           <div class="text-xs font-bold text-[var(--text-sub)] opacity-70 uppercase tracking-wider mb-1 flex justify-between items-center">
             <span>{{ mode.replace('_', ' ') }} Settings</span>
-            <span v-if="mode !== 'SERIAL' && mode !== 'JLINK' && mode !== 'TCP_CLIENT'" class="text-[10px] bg-[var(--col-primary)] text-white px-1.5 py-0.5 rounded-full">More</span>
+            <span v-if="mode !== 'SERIAL' && mode !== 'RTT' && mode !== 'TCP_CLIENT'" class="text-[10px] bg-[var(--col-primary)] text-white px-1.5 py-0.5 rounded-full">More</span>
           </div>
 
           <Transition name="fade" mode="out-in">
@@ -654,8 +654,8 @@ const scrollToBottom = () => {
               </div>
             </div>
 
-            <!-- J-LINK Settings -->
-            <div v-else-if="mode === 'JLINK'" key="JLINK" class="space-y-3">
+            <!-- RTT Settings -->
+            <div v-else-if="mode === 'RTT'" key="RTT" class="space-y-3">
               <div class="control-group"><label>Chip</label><input type="text" v-model="jlinkChip" class="morandi-input" placeholder="e.g. STM32F407VE" :disabled="isConnected"></div>
               
               <!-- Interface -->
