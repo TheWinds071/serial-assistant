@@ -44,7 +44,7 @@ type App struct {
 	udpConn     net.PacketConn // 用于 UDP
 	udpRemote   net.Addr       // UDP 远程地址 (用于发送)
 
-	// J-Link 资源
+	// RTT 资源
 	jlinkConn *jlink.JLinkWrapper
 }
 
@@ -131,7 +131,7 @@ func (a *App) OpenSerial(portName string, baudRate int, dataBits int, stopBits i
 	return "Success"
 }
 
-// OpenJLink 连接 J-Link
+// OpenJLink 连接 RTT
 func (a *App) OpenJLink(chip string, speed int, iface string) string {
 	a.mutex.Lock()
 	defer a.mutex.Unlock()
@@ -166,7 +166,7 @@ func (a *App) OpenJLink(chip string, speed int, iface string) string {
 	a.isConnected = true
 	a.readStopChan = make(chan struct{})
 
-	// 3. 启动 J-Link 专用读取循环 (因为它的 API 不是 io.Reader 风格，而是轮询)
+	// 3. 启动 RTT 专用读取循环 (因为它的 API 不是 io.Reader 风格，而是轮询)
 	go a.jlinkReadLoop()
 
 	return "Success"
@@ -195,7 +195,7 @@ func (a *App) jlinkReadLoop() {
 			data, err := jl.ReadRTT()
 			if err != nil {
 				// 读取错误通常意味着掉线
-				runtime.EventsEmit(a.ctx, "serial-error", fmt.Sprintf("J-Link RTT Error: %v", err))
+				runtime.EventsEmit(a.ctx, "serial-error", fmt.Sprintf("RTT Error: %v", err))
 				a.Close()
 				return
 			}
