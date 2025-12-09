@@ -443,7 +443,7 @@ const scrollToBottom = () => {
             <div v-for="(val, key) in theme" :key="key" class="group">
               <label class="text-[10px] font-bold text-[var(--text-sub)] uppercase tracking-wider mb-1.5 block">{{ getThemeLabel(key.toString()) }}</label>
               <div class="flex items-center gap-2 bg-gradient-to-r from-black/[0.03] to-black/[0.05] hover:from-black/[0.05] hover:to-black/[0.08] rounded-lg p-2 transition-all border border-black/5 group-hover:border-[var(--col-primary)]/30 group-hover:shadow-sm">
-                <input type="color" v-model="theme[key as keyof ThemeType]" class="w-6 h-6 rounded-md cursor-pointer border border-white shadow-sm overflow-hidden shrink-0" style="padding: 0;">
+                <input type="color" v-model="theme[key as keyof ThemeType]" class="w-6 h-6 rounded-md cursor-pointer border border-white shadow-sm overflow-hidden shrink-0 p-0">
                 <input type="text" v-model="theme[key as keyof ThemeType]" class="flex-1 bg-transparent border-none text-[11px] font-mono text-[var(--text-main)] font-bold focus:outline-none uppercase tracking-wide">
               </div>
             </div>
