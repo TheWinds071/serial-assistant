@@ -411,74 +411,137 @@ const scrollToBottom = () => {
         </div>
       </div>
 
-      <!-- 主题面板 (已修复：添加了颜色输入控件) -->
-      <Transition name="slide-down">
-        <div v-if="showThemePanel" class="absolute top-14 left-0 w-full bg-white/95 backdrop-blur-md p-4 shadow-xl border-b border-black/5 z-20 flex flex-col gap-3">
-          <div class="flex justify-between items-center text-xs font-bold text-[var(--text-sub)] mb-1">
-            <span>自定义配色</span>
-            <button @click="resetTheme" class="hover:text-[var(--col-primary)] transition-colors">重置默认</button>
-          </div>
+      <!-- 主题面板背景遮罩 -->
+      <Transition name="backdrop-fade">
+        <div v-if="showThemePanel" @click="showThemePanel = false" class="fixed inset-0 bg-black/10 z-10"></div>
+      </Transition>
 
-          <div class="grid grid-cols-2 gap-3">
-            <div v-for="(val, key) in theme" :key="key" class="flex flex-col gap-1">
-              <label class="text-[10px] font-bold text-[var(--text-sub)] uppercase tracking-wide">{{ getThemeLabel(key.toString()) }}</label>
-              <div class="flex items-center gap-2 bg-black/5 rounded p-1 pl-2">
-                <input type="color" v-model="theme[key as keyof ThemeType]" class="w-5 h-5 rounded cursor-pointer border-none bg-transparent p-0 shrink-0">
-                <input type="text" v-model="theme[key as keyof ThemeType]" class="w-full bg-transparent border-none text-[10px] font-mono text-[var(--text-main)] focus:outline-none uppercase">
+      <!-- 主题面板 (美化版本) -->
+      <Transition name="slide-down">
+        <div v-if="showThemePanel" @click.stop class="absolute top-14 left-0 w-full bg-white/98 backdrop-blur-xl p-5 shadow-2xl border-b border-black/5 z-20 flex flex-col gap-4 ring-1 ring-black/5">
+          <!-- 标题栏 -->
+          <div class="flex justify-between items-center">
+            <div class="flex items-center gap-2">
+              <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-[var(--col-primary)] to-[var(--col-primary)]/70 flex items-center justify-center shadow-sm">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="13.5" cy="6.5" r=".5"></circle><circle cx="17.5" cy="10.5" r=".5"></circle><circle cx="8.5" cy="7.5" r=".5"></circle><circle cx="6.5" cy="12.5" r=".5"></circle><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z"></path></svg>
+              </div>
+              <div>
+                <div class="text-sm font-bold text-[var(--text-main)]">主题配色</div>
+                <div class="text-[10px] text-[var(--text-sub)]">自定义界面颜色方案</div>
               </div>
             </div>
+            <button @click="resetTheme" class="px-3 py-1.5 text-[11px] font-bold text-[var(--col-primary)] hover:bg-[var(--col-primary)]/10 rounded-md transition-all">
+              <div class="flex items-center gap-1.5">
+                <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"></path><path d="M3 21v-5h5"></path></svg>
+                <span>重置</span>
+              </div>
+            </button>
+          </div>
+
+          <!-- 颜色选择器网格 -->
+          <div class="grid grid-cols-2 gap-3">
+            <div v-for="(val, key) in theme" :key="key" class="group">
+              <label class="text-[10px] font-bold text-[var(--text-sub)] uppercase tracking-wider mb-1.5 block">{{ getThemeLabel(key.toString()) }}</label>
+              <div class="flex items-center gap-2 bg-gradient-to-r from-black/[0.03] to-black/[0.05] hover:from-black/[0.05] hover:to-black/[0.08] rounded-lg p-2 transition-all border border-black/5 group-hover:border-[var(--col-primary)]/30 group-hover:shadow-sm">
+                <input type="color" v-model="theme[key as keyof ThemeType]" class="w-6 h-6 rounded-md cursor-pointer border border-white shadow-sm overflow-hidden shrink-0" style="padding: 0;">
+                <input type="text" v-model="theme[key as keyof ThemeType]" class="flex-1 bg-transparent border-none text-[11px] font-mono text-[var(--text-main)] font-bold focus:outline-none uppercase tracking-wide">
+              </div>
+            </div>
+          </div>
+
+          <!-- 提示文本 -->
+          <div class="text-[10px] text-[var(--text-sub)] text-center pt-1 border-t border-black/5">
+            💡 点击空白处关闭面板
           </div>
         </div>
       </Transition>
 
-      <!-- 关于与更新面板 -->
+      <!-- 关于面板背景遮罩 -->
+      <Transition name="backdrop-fade">
+        <div v-if="showAboutPanel" @click="showAboutPanel = false" class="fixed inset-0 bg-black/10 z-10"></div>
+      </Transition>
+
+      <!-- 关于与更新面板 (美化版本) -->
       <Transition name="slide-down">
-        <div v-if="showAboutPanel" class="absolute top-14 left-0 w-full bg-white/95 backdrop-blur-md p-4 shadow-xl border-b border-black/5 z-20 flex flex-col gap-3">
-          <div class="flex justify-between items-center text-xs font-bold text-[var(--text-sub)] mb-1">
-            <span>关于 Serial Mate</span>
-            <button @click="showAboutPanel = false" class="hover:text-[var(--col-primary)] transition-colors">关闭</button>
+        <div v-if="showAboutPanel" @click.stop class="absolute top-14 left-0 w-full bg-white/98 backdrop-blur-xl p-5 shadow-2xl border-b border-black/5 z-20 flex flex-col gap-4 ring-1 ring-black/5">
+          <!-- 标题栏 -->
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-[var(--col-primary)] to-[var(--col-primary)]/70 flex items-center justify-center shadow-lg">
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+            </div>
+            <div class="flex-1">
+              <div class="text-sm font-bold text-[var(--text-main)]">关于 Serial Mate</div>
+              <div class="text-[10px] text-[var(--text-sub)]">多功能串口通信工具</div>
+            </div>
           </div>
 
-          <div class="flex flex-col gap-2">
-            <div class="text-xs text-[var(--text-main)]">
-              <div class="flex justify-between py-1">
-                <span class="text-[var(--text-sub)]">当前版本:</span>
-                <span class="font-mono font-bold">{{ appVersion }}</span>
+          <!-- 版本信息卡片 -->
+          <div class="bg-gradient-to-r from-black/[0.03] to-black/[0.05] rounded-lg p-4 border border-black/5">
+            <div class="flex items-center justify-between mb-3">
+              <div class="flex items-center gap-2">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-[var(--col-primary)]"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
+                <span class="text-xs font-bold text-[var(--text-sub)]">当前版本</span>
               </div>
+              <span class="text-sm font-mono font-bold text-[var(--col-primary)] bg-[var(--col-primary)]/10 px-3 py-1 rounded-full">{{ appVersion }}</span>
             </div>
 
-            <div class="flex gap-2 mt-2">
-              <button @click="checkForUpdates" 
-                      :disabled="updateInfo.checking"
-                      class="flex-1 py-2 px-3 rounded text-xs font-bold transition-all disabled:opacity-50"
-                      :class="updateInfo.checking ? 'bg-black/5 text-[var(--text-sub)]' : 'bg-[var(--col-primary)] text-white hover:opacity-90'">
-                {{ updateInfo.checking ? '检查中...' : '检查更新' }}
-              </button>
-            </div>
+            <!-- 检查更新按钮 -->
+            <button @click="checkForUpdates" 
+                    :disabled="updateInfo.checking"
+                    class="w-full py-2.5 px-4 rounded-lg text-xs font-bold transition-all disabled:opacity-50 flex items-center justify-center gap-2 shadow-sm"
+                    :class="updateInfo.checking ? 'bg-black/5 text-[var(--text-sub)]' : 'bg-[var(--col-primary)] text-white hover:opacity-90 hover:shadow-md'">
+              <svg v-if="!updateInfo.checking" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"></path></svg>
+              <div v-else class="w-3.5 h-3.5 border-2 border-[var(--text-sub)]/30 border-t-[var(--text-sub)] rounded-full animate-spin"></div>
+              <span>{{ updateInfo.checking ? '检查中...' : '检查更新' }}</span>
+            </button>
+          </div>
 
-            <div v-if="updateInfo.available" class="mt-2 p-3 bg-[var(--col-primary)]/10 rounded text-xs">
-              <div class="font-bold text-[var(--col-primary)] mb-2">
-                🎉 发现新版本: {{ updateInfo.latestVersion }}
-              </div>
-              <div class="text-[var(--text-sub)] mb-2 max-h-24 overflow-y-auto text-[10px] whitespace-pre-wrap">
-                {{ updateInfo.releaseNotes }}
-              </div>
-              <button @click="downloadAndInstall" 
-                      :disabled="updateProgress.downloading"
-                      class="w-full py-2 px-3 rounded text-xs font-bold bg-[var(--col-primary)] text-white hover:opacity-90 transition-all disabled:opacity-50">
-                {{ updateProgress.downloading ? '下载中...' : '立即更新' }}
-              </button>
-              
-              <div v-if="updateProgress.downloading" class="mt-2">
-                <div class="flex justify-between text-[10px] text-[var(--text-sub)] mb-1">
-                  <span>{{ (updateProgress.downloaded / 1024 / 1024).toFixed(2) }} MB / {{ (updateProgress.total / 1024 / 1024).toFixed(2) }} MB</span>
-                  <span>{{ updateProgress.progress.toFixed(0) }}%</span>
+          <!-- 更新信息卡片 -->
+          <div v-if="updateInfo.available" class="bg-gradient-to-r from-[var(--col-primary)]/10 to-[var(--col-primary)]/5 rounded-lg p-4 border border-[var(--col-primary)]/20 shadow-sm">
+            <div class="flex items-start gap-2 mb-3">
+              <div class="text-2xl">🎉</div>
+              <div class="flex-1">
+                <div class="font-bold text-[var(--col-primary)] text-sm mb-1">
+                  发现新版本
                 </div>
-                <div class="w-full h-1.5 bg-black/10 rounded-full overflow-hidden">
-                  <div class="h-full bg-[var(--col-primary)] transition-all duration-300" :style="{ width: updateProgress.progress + '%' }"></div>
+                <div class="text-xs text-[var(--text-main)]">
+                  <span class="font-mono bg-white/60 px-2 py-0.5 rounded">{{ updateInfo.currentVersion }}</span>
+                  <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="inline mx-1 opacity-50"><polyline points="9 18 15 12 9 6"></polyline></svg>
+                  <span class="font-mono bg-[var(--col-primary)]/20 px-2 py-0.5 rounded font-bold">{{ updateInfo.latestVersion }}</span>
                 </div>
               </div>
             </div>
+            
+            <!-- 更新说明 -->
+            <div v-if="updateInfo.releaseNotes" class="bg-white/60 rounded-lg p-3 mb-3 max-h-28 overflow-y-auto custom-scrollbar border border-black/5">
+              <div class="text-[10px] font-bold text-[var(--text-sub)] mb-1.5 uppercase tracking-wider">更新内容</div>
+              <div class="text-[11px] text-[var(--text-main)] leading-relaxed whitespace-pre-wrap font-mono">{{ updateInfo.releaseNotes }}</div>
+            </div>
+            
+            <!-- 立即更新按钮 -->
+            <button @click="downloadAndInstall" 
+                    :disabled="updateProgress.downloading"
+                    class="w-full py-2.5 px-4 rounded-lg text-xs font-bold bg-[var(--col-primary)] text-white hover:opacity-90 transition-all disabled:opacity-50 shadow-sm hover:shadow-md flex items-center justify-center gap-2">
+              <svg v-if="!updateProgress.downloading" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+              <div v-else class="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+              <span>{{ updateProgress.downloading ? '下载中...' : '立即更新' }}</span>
+            </button>
+            
+            <!-- 下载进度条 -->
+            <div v-if="updateProgress.downloading" class="mt-3">
+              <div class="flex justify-between text-[10px] text-[var(--text-sub)] mb-1.5">
+                <span class="font-mono">{{ (updateProgress.downloaded / 1024 / 1024).toFixed(2) }} MB / {{ (updateProgress.total / 1024 / 1024).toFixed(2) }} MB</span>
+                <span class="font-bold">{{ updateProgress.progress.toFixed(0) }}%</span>
+              </div>
+              <div class="w-full h-2 bg-white/60 rounded-full overflow-hidden border border-black/5 shadow-inner">
+                <div class="h-full bg-gradient-to-r from-[var(--col-primary)] to-[var(--col-primary)]/80 transition-all duration-300 rounded-full" :style="{ width: updateProgress.progress + '%' }"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 提示文本 -->
+          <div class="text-[10px] text-[var(--text-sub)] text-center pt-1 border-t border-black/5">
+            💡 点击空白处关闭面板
           </div>
         </div>
       </Transition>
@@ -833,6 +896,12 @@ const scrollToBottom = () => {
 .slide-down-leave-active { transition: all 0.2s ease-in; }
 .slide-down-enter-from,
 .slide-down-leave-to { transform: translateY(-10px); opacity: 0; }
+
+/* 背景遮罩淡入淡出动画 */
+.backdrop-fade-enter-active { transition: opacity 0.25s ease-out; }
+.backdrop-fade-leave-active { transition: opacity 0.2s ease-in; }
+.backdrop-fade-enter-from,
+.backdrop-fade-leave-to { opacity: 0; }
 
 /* 汉堡菜单下拉动画 */
 .dropdown-fade-enter-active { transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1); }
