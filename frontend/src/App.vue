@@ -449,10 +449,6 @@ const scrollToBottom = () => {
             </div>
           </div>
 
-          <!-- 提示文本 -->
-          <div class="text-[10px] text-[var(--text-sub)] text-center pt-1 border-t border-black/5">
-            💡 点击空白处关闭面板
-          </div>
         </div>
       </Transition>
 
@@ -539,10 +535,6 @@ const scrollToBottom = () => {
             </div>
           </div>
 
-          <!-- 提示文本 -->
-          <div class="text-[10px] text-[var(--text-sub)] text-center pt-1 border-t border-black/5">
-            💡 点击空白处关闭面板
-          </div>
         </div>
       </Transition>
 
