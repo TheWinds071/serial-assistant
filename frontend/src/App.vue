@@ -64,6 +64,8 @@ const sendInput = ref('');
 const showHex = ref(false);
 // Hex 发送状态
 const hexSend = ref(false);
+//时间戳开关状态
+const showTimestamp = ref(false);
 
 // 行尾符配置
 const lineEndingMode = ref<'NONE' | 'LF' | 'CRLF'>('NONE');
@@ -259,6 +261,15 @@ onMounted(async () => {
 
       // 2. 更新 receivedData (显示文本)
       const newData = formatData(bytes, showHex.value);
+
+      // [修改] 如果开启了时间戳，在将新数据追加到显示区域前，先拼接时间戳
+      // 注意：这里的时间戳仅追加在显示层，不会存入 rawDataBuffer (这意味着切换 Hex/Text 视图时时间戳会因重绘而消失，这是符合预期的轻量级实现)
+      if (showTimestamp.value) {
+        // 如果需要换行逻辑，可以在这里判断 receivedData 末尾是否已有换行
+        // 简单实现：在每个接收到的数据包前加时间戳
+        receivedData.value += getTimeStamp();
+      }
+
       receivedData.value += newData;
 
       // 如果文本过长，从头部截断
@@ -402,6 +413,14 @@ const clearReceive = () => {
     isBroomClicked.value = false;
     broomAnimationTimer = null;
   }, BROOM_ANIMATION_DURATION);
+};
+
+// 获取当前时间戳字符串函数
+const getTimeStamp = () => {
+  const now = new Date();
+  const time = now.toLocaleTimeString('en-GB', { hour12: false }); // HH:mm:ss
+  const ms = String(now.getMilliseconds()).padStart(3, '0');
+  return `[${time}.${ms}] `;
 };
 
 const decoder = new TextDecoder('utf-8');
@@ -802,6 +821,10 @@ const scrollToBottom = () => {
           <label class="flex items-center space-x-2 cursor-pointer hover:text-[var(--col-primary)] transition-colors">
             <input type="checkbox" v-model="showHex" class="accent-[var(--col-primary)] w-4 h-4">
             <span class="text-sm">Hex 显示</span>
+          </label>
+          <label class="flex items-center space-x-2 cursor-pointer hover:text-[var(--col-primary)] transition-colors">
+            <input type="checkbox" v-model="showTimestamp" class="accent-[var(--col-primary)] w-4 h-4">
+            <span class="text-sm">显示时间戳</span>
           </label>
           <label class="flex items-center space-x-2 cursor-pointer hover:text-[var(--col-primary)] transition-colors">
             <input type="checkbox" v-model="autoScroll" class="accent-[var(--col-primary)] w-4 h-4">
