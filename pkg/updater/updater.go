@@ -338,6 +338,7 @@ func RestartApplication(delaySeconds int) error {
 	if runtime.GOOS == "windows" {
 		// For Windows, use cmd.exe to delay and restart
 		// Use /C to execute the command and close, ping for delay, and start to launch the app
+		// Note: ping -n counts include the first immediate ping, so we add 1 to match the delay
 		// The executable path is properly quoted to handle spaces and special characters
 		cmd := exec.Command("cmd", "/C", fmt.Sprintf("ping 127.0.0.1 -n %d > nul && start \"\" \"%s\"", delaySeconds+1, escapeWindowsPath(exePath)))
 		cmd.Stdout = nil
