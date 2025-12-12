@@ -967,7 +967,17 @@ const scrollToBottom = () => {
   10%, 30%, 50%, 70%, 90% { transform: translateX(-4px); }
   20%, 40%, 60%, 80% { transform: translateX(4px); }
 }
-.shake-anim { animation: shake-x 0.4s cubic-bezier(0.36, 0.07, 0.19, 0.97) both; border-color: rgba(239, 68, 68, 0.5); }
+.shake-anim { animation: shake-x 0.4s cubic-bezier(0.36, 0.07, 0.19, 0.97) both;}
+
+/* 新增：利用 CSS 选择器，当父级震动时，直接让内部带边框的元素变红 */
+.shake-anim :deep(.border) {
+  /* 强制边框变红 */
+  border-color: var(--col-error) !important;
+  /* 添加一道 1px 的无模糊红色外扩实线，增强视觉厚度，比单纯变色更明显 */
+  box-shadow: 0 0 0 0.1px var(--col-error) !important;
+  /* 稍微加一点过渡，让红色褪去时平滑一些（出现时是瞬时的） */
+  transition: border-color 0.1s, box-shadow 0.1s;
+}
 
 @keyframes broom-sweep {
   0%, 100% { transform: rotate(0deg) translateX(0); }
