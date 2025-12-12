@@ -577,9 +577,10 @@ func (a *App) DownloadAndInstallUpdate(downloadURL string) error {
 	}
 
 	// Quit the application (new instance will start after delay)
+	// Note: runtime.Quit() will terminate the application, so code after this won't execute
 	runtime.Quit(a.ctx)
 
-	return nil
+	return nil // Unreachable, but kept for API consistency
 }
 
 // QuitApp quits the application (user can manually restart it)

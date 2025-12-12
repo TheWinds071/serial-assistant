@@ -185,8 +185,20 @@ func TestRestartApplication(t *testing.T) {
 	// We can't fully test the restart functionality in unit tests, but we can ensure
 	// the function handles basic execution without errors
 
-	// Test with a small delay
-	err := RestartApplication(1)
+	// Test with invalid delay (too small)
+	err := RestartApplication(0)
+	if err == nil {
+		t.Error("Expected error for delay < 1, got nil")
+	}
+
+	// Test with invalid delay (too large)
+	err = RestartApplication(61)
+	if err == nil {
+		t.Error("Expected error for delay > 60, got nil")
+	}
+
+	// Test with a valid delay
+	err = RestartApplication(1)
 
 	// On some systems (especially in CI), the command may fail if there's no shell available
 	// or if the current executable path cannot be determined, which is acceptable
@@ -198,4 +210,43 @@ func TestRestartApplication(t *testing.T) {
 
 	// The function should not panic regardless of the environment
 	// If we reach here, the test passes
+}
+
+func TestEscapeShellArg(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"simple", "'simple'"},
+		{"with space", "'with space'"},
+		{"with'quote", "'with'\\''quote'"},
+		{"/path/to/file", "'/path/to/file'"},
+		{"C:\\Program Files\\app.exe", "'C:\\Program Files\\app.exe'"},
+	}
+
+	for _, tt := range tests {
+		result := escapeShellArg(tt.input)
+		if result != tt.expected {
+			t.Errorf("escapeShellArg(%q) = %q, want %q", tt.input, result, tt.expected)
+		}
+	}
+}
+
+func TestEscapeWindowsPath(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"C:\\Program Files\\app.exe", "C:\\Program Files\\app.exe"},
+		{"path with \"quotes\"", "path with \"\"quotes\"\""},
+		{"path with %var%", "path with %%var%%"},
+		{"C:\\Users\\Test\"User\\app.exe", "C:\\Users\\Test\"\"User\\app.exe"},
+	}
+
+	for _, tt := range tests {
+		result := escapeWindowsPath(tt.input)
+		if result != tt.expected {
+			t.Errorf("escapeWindowsPath(%q) = %q, want %q", tt.input, result, tt.expected)
+		}
+	}
 }
