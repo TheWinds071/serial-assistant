@@ -39,6 +39,9 @@ type JLinkWrapper struct {
 
 	// 日志回调
 	logCallback LogCallback
+
+	// 读取缓冲区重用（避免频繁分配）
+	readBuffer []byte
 }
 
 // RTTBufferDesc RTT 缓冲区描述符
@@ -79,7 +82,11 @@ func NewJLinkWrapper(logCallback LogCallback) (*JLinkWrapper, error) {
 		}
 	}
 
-	jl := &JLinkWrapper{libHandle: lib, logCallback: logCallback}
+	jl := &JLinkWrapper{
+		libHandle:   lib,
+		logCallback: logCallback,
+		readBuffer:  make([]byte, 4096), // 预分配读取缓冲区
+	}
 
 	// 注册函数 - registerLibFunc 是跨平台的，可以在这里安全使用
 	register := func(dest interface{}, name string) {
@@ -171,12 +178,15 @@ func (jl *JLinkWrapper) ReadRTT() ([]byte, error) {
 		if jl.apiRTTRead == nil {
 			return nil, nil
 		}
-		buf := make([]byte, 4096)
-		n := jl.apiRTTRead(0, uintptr(unsafe.Pointer(&buf[0])), uint32(len(buf)))
+		// 重用预分配的缓冲区，避免每次调用都分配内存
+		n := jl.apiRTTRead(0, uintptr(unsafe.Pointer(&jl.readBuffer[0])), uint32(len(jl.readBuffer)))
 		if n <= 0 {
 			return nil, nil
 		}
-		return buf[:n], nil
+		// 返回数据的副本，保护内部缓冲区
+		result := make([]byte, n)
+		copy(result, jl.readBuffer[:n])
+		return result, nil
 	}
 	return jl.readSoftRTT()
 }
@@ -243,43 +253,84 @@ func (jl *JLinkWrapper) readSoftRTT() ([]byte, error) {
 	wrOffAddr := jl.rttControlBlk + 24 + 12
 	var wrOff uint32
 	if jl.apiReadMem(wrOffAddr, 4, uintptr(unsafe.Pointer(&wrOff))) < 0 {
-		return nil, nil
+		return nil, fmt.Errorf("failed to read write offset")
 	}
 	rdOffAddr := jl.rttControlBlk + 24 + 16
 	var rdOff uint32
 	if jl.apiReadMem(rdOffAddr, 4, uintptr(unsafe.Pointer(&rdOff))) < 0 {
-		return nil, nil
-	}
-	if wrOff == rdOff {
-		return nil, nil
+		return nil, fmt.Errorf("failed to read read offset")
 	}
 
 	bufBase := jl.rttUpBuffer.BufferPtr
 	bufSize := jl.rttUpBuffer.Size
+
+	// 关键修复：验证偏移量是否在有效范围内
+	// 如果连接中断或状态损坏，偏移量可能变得异常大
+	if wrOff >= bufSize || rdOff >= bufSize {
+		jl.log(fmt.Sprintf("[RTT] 错误：偏移量超出范围 (wrOff=%d, rdOff=%d, bufSize=%d)", wrOff, rdOff, bufSize))
+		return nil, fmt.Errorf("RTT offset out of bounds: wrOff=%d, rdOff=%d, bufSize=%d", wrOff, rdOff, bufSize)
+	}
+
+	if wrOff == rdOff {
+		return nil, nil
+	}
+
 	var data []byte
+	const maxReadSize = 64 * 1024 // 最大单次读取 64KB，防止内存耗尽
 
 	if wrOff > rdOff {
 		readLen := wrOff - rdOff
+		// 关键修复：限制读取长度，防止分配过大内存
+		if readLen > maxReadSize {
+			jl.log(fmt.Sprintf("[RTT] 警告：读取长度过大 (%d bytes)，限制为 %d bytes", readLen, maxReadSize))
+			readLen = maxReadSize
+		}
 		chunk := make([]byte, readLen)
-		jl.apiReadMem(bufBase+rdOff, readLen, uintptr(unsafe.Pointer(&chunk[0])))
+		if jl.apiReadMem(bufBase+rdOff, readLen, uintptr(unsafe.Pointer(&chunk[0]))) < 0 {
+			return nil, fmt.Errorf("failed to read RTT data")
+		}
 		data = chunk
 		rdOff += readLen
 	} else {
+		// 环形缓冲区回绕情况
 		len1 := bufSize - rdOff
+		len2 := wrOff
+		totalLen := len1 + len2
+
+		// 关键修复：检查总读取长度
+		if totalLen > maxReadSize {
+			jl.log(fmt.Sprintf("[RTT] 警告：总读取长度过大 (%d bytes)，限制为 %d bytes", totalLen, maxReadSize))
+			// 优先读取缓冲区末尾的数据
+			if len1 > maxReadSize {
+				len1 = maxReadSize
+				len2 = 0
+			} else {
+				len2 = maxReadSize - len1
+			}
+		}
+
 		if len1 > 0 {
 			chunk1 := make([]byte, len1)
-			jl.apiReadMem(bufBase+rdOff, len1, uintptr(unsafe.Pointer(&chunk1[0])))
+			if jl.apiReadMem(bufBase+rdOff, len1, uintptr(unsafe.Pointer(&chunk1[0]))) < 0 {
+				return nil, fmt.Errorf("failed to read RTT data (segment 1)")
+			}
 			data = append(data, chunk1...)
 		}
-		len2 := wrOff
 		if len2 > 0 {
 			chunk2 := make([]byte, len2)
-			jl.apiReadMem(bufBase, len2, uintptr(unsafe.Pointer(&chunk2[0])))
+			if jl.apiReadMem(bufBase, len2, uintptr(unsafe.Pointer(&chunk2[0]))) < 0 {
+				return nil, fmt.Errorf("failed to read RTT data (segment 2)")
+			}
 			data = append(data, chunk2...)
 		}
-		rdOff = wrOff
+		// 更新读偏移量，考虑可能的截断
+		rdOff = (rdOff + len1 + len2) % bufSize
 	}
-	jl.apiWriteMem(rdOffAddr, 4, uintptr(unsafe.Pointer(&rdOff)))
+
+	// 写回更新的读偏移量
+	if jl.apiWriteMem(rdOffAddr, 4, uintptr(unsafe.Pointer(&rdOff))) < 0 {
+		jl.log("[RTT] 警告：无法更新读偏移量")
+	}
 	return data, nil
 }
 

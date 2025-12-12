@@ -177,6 +177,9 @@ func (a *App) jlinkReadLoop() {
 	ticker := time.NewTicker(10 * time.Millisecond) // 10ms 轮询一次
 	defer ticker.Stop()
 
+	consecutiveErrors := 0
+	const maxConsecutiveErrors = 10 // 连续错误次数阈值
+
 	for {
 		select {
 		case <-a.readStopChan:
@@ -194,11 +197,23 @@ func (a *App) jlinkReadLoop() {
 
 			data, err := jl.ReadRTT()
 			if err != nil {
-				// 读取错误通常意味着掉线
-				runtime.EventsEmit(a.ctx, "serial-error", fmt.Sprintf("RTT Error: %v", err))
-				a.Close()
-				return
+				consecutiveErrors++
+				// 增加容错机制：只有连续多次错误才关闭连接
+				// 这样可以避免偶发错误导致断连，同时确保持续错误时能及时断开
+				if consecutiveErrors >= maxConsecutiveErrors {
+					runtime.EventsEmit(a.ctx, "serial-error", fmt.Sprintf("RTT Error (连续 %d 次): %v", consecutiveErrors, err))
+					a.Close()
+					return
+				}
+				// 首次或少量错误时，仅记录日志，继续尝试
+				if consecutiveErrors == 1 {
+					runtime.EventsEmit(a.ctx, "sys-msg", fmt.Sprintf("RTT 读取警告: %v", err))
+				}
+				continue
 			}
+
+			// 成功读取，重置错误计数
+			consecutiveErrors = 0
 
 			if len(data) > 0 {
 				runtime.EventsEmit(a.ctx, "serial-data", data)
