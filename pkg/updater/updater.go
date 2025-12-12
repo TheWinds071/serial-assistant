@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -313,4 +314,68 @@ func copyFile(src, dst string) error {
 
 	// Sync to ensure data is written to disk
 	return destFile.Sync()
+}
+
+// RestartApplication restarts the application after a delay
+// This function spawns a new process and exits the current one
+func RestartApplication(delaySeconds int) error {
+	// Validate delay parameter to prevent excessively long delays or negative values
+	if delaySeconds < 1 || delaySeconds > 60 {
+		return fmt.Errorf("delay must be between 1 and 60 seconds, got %d", delaySeconds)
+	}
+
+	exePath, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("failed to get executable path: %w", err)
+	}
+
+	// Resolve symlinks
+	exePath, err = filepath.EvalSymlinks(exePath)
+	if err != nil {
+		return fmt.Errorf("failed to resolve symlinks: %w", err)
+	}
+
+	if runtime.GOOS == "windows" {
+		// For Windows, use cmd.exe to delay and restart
+		// Use /C to execute the command and close, ping for delay, and start to launch the app
+		// Note: ping -n counts include the first immediate ping, so we add 1 to match the delay
+		// The executable path is properly quoted to handle spaces and special characters
+		cmd := exec.Command("cmd", "/C", fmt.Sprintf("ping 127.0.0.1 -n %d > nul && start \"\" \"%s\"", delaySeconds+1, escapeWindowsPath(exePath)))
+		cmd.Stdout = nil
+		cmd.Stderr = nil
+		if err := cmd.Start(); err != nil {
+			return fmt.Errorf("failed to schedule restart: %w", err)
+		}
+	} else {
+		// For Unix-like systems, use a shell script with sleep and exec
+		// Use proper shell escaping to prevent command injection
+		cmd := exec.Command("sh", "-c", fmt.Sprintf("sleep %d && exec %s &", delaySeconds, escapeShellArg(exePath)))
+		cmd.Stdout = nil
+		cmd.Stderr = nil
+		if err := cmd.Start(); err != nil {
+			return fmt.Errorf("failed to schedule restart: %w", err)
+		}
+	}
+
+	return nil
+}
+
+// escapeWindowsPath escapes a Windows path for use in cmd.exe commands
+// Replaces special characters that could break the command
+func escapeWindowsPath(path string) string {
+	// For Windows paths in double quotes, we need to escape:
+	// - Double quotes (") -> ""
+	// - Percent signs (%) -> %%
+	path = strings.ReplaceAll(path, "\"", "\"\"")
+	path = strings.ReplaceAll(path, "%", "%%")
+	return path
+}
+
+// escapeShellArg escapes a string for safe use as a shell argument
+// Uses single quotes to prevent variable expansion and command substitution
+func escapeShellArg(arg string) string {
+	// Replace single quotes with '\'' (end quote, escaped quote, start quote)
+	// Then wrap the whole string in single quotes
+	escaped := strings.ReplaceAll(arg, "'", "'\\''")
+	return "'" + escaped + "'"
 }
