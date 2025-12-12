@@ -9,7 +9,7 @@ import (
 )
 
 // Version is the current application version
-const Version = "v1.3.3"
+const Version = "v1.3.4"
 
 //go:embed all:frontend/dist
 var assets embed.FS
