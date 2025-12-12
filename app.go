@@ -1,12 +1,12 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"io"
 	"net"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -204,8 +204,8 @@ func (a *App) jlinkReadLoop() {
 				
 				// 检测是否是偏移量错误（STM32 复位导致）
 				errMsg := err.Error()
-				if consecutiveErrors == 1 && (bytes.Contains([]byte(errMsg), []byte("offset out of bounds")) || 
-					bytes.Contains([]byte(errMsg), []byte("偏移量超出范围"))) {
+				if consecutiveErrors == 1 && (strings.Contains(errMsg, "offset out of bounds") || 
+					strings.Contains(errMsg, "偏移量超出范围")) {
 					runtime.EventsEmit(a.ctx, "sys-msg", "[RTT] 检测到目标设备可能已复位，尝试重新连接...")
 					// 尝试重新初始化 RTT
 					if reinitErr := jl.ReinitSoftRTT(); reinitErr == nil {

@@ -352,7 +352,7 @@ func parseBufferDesc(data []byte) RTTBufferDesc {
 	}
 }
 
-// ReinitSoftRTT 尝试重新初始化软件 RTT（用于 STM32 复位后恢复连接）
+// ReinitSoftRTT attempts to reinitialize software RTT (used to recover connection after STM32 reset)
 func (jl *JLinkWrapper) ReinitSoftRTT() error {
 	if !jl.useSoftRTT {
 		return fmt.Errorf("not using soft RTT")
