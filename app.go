@@ -178,7 +178,9 @@ func (a *App) jlinkReadLoop() {
 	defer ticker.Stop()
 
 	consecutiveErrors := 0
-	const maxConsecutiveErrors = 10 // 连续错误次数阈值
+	// 连续错误次数阈值：允许少量偶发错误，避免瞬时故障导致断连
+	// 但在持续错误时及时断开连接，防止无效轮询占用资源
+	const maxConsecutiveErrors = 10
 
 	for {
 		select {

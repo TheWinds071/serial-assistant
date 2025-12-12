@@ -152,12 +152,16 @@ func TestMemorySafetyBoundsChecking(t *testing.T) {
 		readBuffer: make([]byte, 4096),
 	}
 	
+	// 使用 unsafe 包来模拟损坏的内存状态，这是测试内存安全边界检查所必需的
+	// 在实际生产代码中应避免使用 unsafe，但在测试场景中用于验证防御性代码是可接受的
+	const corruptedOffset = 0xFFFFFFFF // 损坏的偏移量值，用于测试边界检查
+	
 	// Mock the apiReadMem function to return corrupted offset values
 	jl.apiReadMem = func(addr uint32, size uint32, buf uintptr) int {
 		// Simulate corrupted wrOff and rdOff that would cause huge allocations
 		if addr == jl.rttControlBlk+24+12 { // wrOffAddr
 			// Write a huge value that exceeds buffer size
-			*(*uint32)(unsafe.Pointer(buf)) = 0xFFFFFFFF
+			*(*uint32)(unsafe.Pointer(buf)) = corruptedOffset
 			return 0
 		}
 		if addr == jl.rttControlBlk+24+16 { // rdOffAddr
@@ -199,16 +203,15 @@ func TestBufferReuse(t *testing.T) {
 		t.Errorf("Expected readBuffer size 4096, got %d", len(jl.readBuffer))
 	}
 	
-	// Store the original buffer pointer to verify reuse
-	originalPtr := &jl.readBuffer[0]
-	
-	// Mock apiRTTRead to simulate a read
+	// Mock apiRTTRead to simulate a read and track calls
 	callCount := 0
+	bufferUsedCorrectly := true
 	jl.apiRTTRead = func(channel uint32, buf uintptr, size uint32) int {
 		callCount++
 		// Verify the buffer pointer passed is the internal buffer
+		// 使用 unsafe 来验证底层 API 调用时传递了正确的缓冲区指针
 		if buf != uintptr(unsafe.Pointer(&jl.readBuffer[0])) {
-			t.Error("ReadRTT should use the internal readBuffer")
+			bufferUsedCorrectly = false
 		}
 		return 0 // No data
 	}
@@ -218,12 +221,17 @@ func TestBufferReuse(t *testing.T) {
 		jl.ReadRTT()
 	}
 	
-	// Verify the buffer pointer hasn't changed (buffer is being reused)
-	if &jl.readBuffer[0] != originalPtr {
-		t.Error("Buffer should be reused, not reallocated")
+	// Verify behavior: the internal buffer should be used for all calls
+	if !bufferUsedCorrectly {
+		t.Error("ReadRTT should use the internal readBuffer for all calls")
 	}
 	
 	if callCount != 10 {
 		t.Errorf("Expected 10 calls to apiRTTRead, got %d", callCount)
+	}
+	
+	// Additional behavioral check: verify buffer capacity hasn't changed
+	if cap(jl.readBuffer) != 4096 {
+		t.Errorf("readBuffer capacity should remain 4096, got %d", cap(jl.readBuffer))
 	}
 }

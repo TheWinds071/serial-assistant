@@ -54,6 +54,13 @@ type RTTBufferDesc struct {
 	Flags     uint32
 }
 
+// RTT 读取限制常量
+const (
+	// maxRTTReadSize 限制单次 RTT 读取的最大字节数，防止在连接中断或
+	// 状态损坏时分配过大的内存缓冲区（例如当偏移量被损坏为极大值时）
+	maxRTTReadSize = 64 * 1024 // 64KB
+)
+
 // NewJLinkWrapper 加载驱动并初始化
 func NewJLinkWrapper(logCallback LogCallback) (*JLinkWrapper, error) {
 	libPath, err := getLibraryPath()
@@ -276,14 +283,13 @@ func (jl *JLinkWrapper) readSoftRTT() ([]byte, error) {
 	}
 
 	var data []byte
-	const maxReadSize = 64 * 1024 // 最大单次读取 64KB，防止内存耗尽
 
 	if wrOff > rdOff {
 		readLen := wrOff - rdOff
 		// 关键修复：限制读取长度，防止分配过大内存
-		if readLen > maxReadSize {
-			jl.log(fmt.Sprintf("[RTT] 警告：读取长度过大 (%d bytes)，限制为 %d bytes", readLen, maxReadSize))
-			readLen = maxReadSize
+		if readLen > maxRTTReadSize {
+			jl.log(fmt.Sprintf("[RTT] 警告：读取长度过大 (%d bytes)，限制为 %d bytes", readLen, maxRTTReadSize))
+			readLen = maxRTTReadSize
 		}
 		chunk := make([]byte, readLen)
 		if jl.apiReadMem(bufBase+rdOff, readLen, uintptr(unsafe.Pointer(&chunk[0]))) < 0 {
@@ -298,14 +304,14 @@ func (jl *JLinkWrapper) readSoftRTT() ([]byte, error) {
 		totalLen := len1 + len2
 
 		// 关键修复：检查总读取长度
-		if totalLen > maxReadSize {
-			jl.log(fmt.Sprintf("[RTT] 警告：总读取长度过大 (%d bytes)，限制为 %d bytes", totalLen, maxReadSize))
+		if totalLen > maxRTTReadSize {
+			jl.log(fmt.Sprintf("[RTT] 警告：总读取长度过大 (%d bytes)，限制为 %d bytes", totalLen, maxRTTReadSize))
 			// 优先读取缓冲区末尾的数据
-			if len1 > maxReadSize {
-				len1 = maxReadSize
+			if len1 > maxRTTReadSize {
+				len1 = maxRTTReadSize
 				len2 = 0
 			} else {
-				len2 = maxReadSize - len1
+				len2 = maxRTTReadSize - len1
 			}
 		}
 
@@ -323,7 +329,8 @@ func (jl *JLinkWrapper) readSoftRTT() ([]byte, error) {
 			}
 			data = append(data, chunk2...)
 		}
-		// 更新读偏移量，考虑可能的截断
+		// 更新读偏移量：len1 和 len2 是实际读取的长度（已考虑截断）
+		// 使用模运算确保在环形缓冲区中正确回绕
 		rdOff = (rdOff + len1 + len2) % bufSize
 	}
 
