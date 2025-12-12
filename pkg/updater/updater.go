@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -313,4 +314,40 @@ func copyFile(src, dst string) error {
 
 	// Sync to ensure data is written to disk
 	return destFile.Sync()
+}
+
+// RestartApplication restarts the application after a delay
+// This function spawns a new process and exits the current one
+func RestartApplication(delaySeconds int) error {
+	exePath, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("failed to get executable path: %w", err)
+	}
+
+	// Resolve symlinks
+	exePath, err = filepath.EvalSymlinks(exePath)
+	if err != nil {
+		return fmt.Errorf("failed to resolve symlinks: %w", err)
+	}
+
+	if runtime.GOOS == "windows" {
+		// For Windows, use cmd.exe to delay and restart
+		// Use /C to execute the command and close, ping for delay, and start to launch the app
+		cmd := exec.Command("cmd", "/C", fmt.Sprintf("ping 127.0.0.1 -n %d > nul && start \"\" \"%s\"", delaySeconds+1, exePath))
+		cmd.Stdout = nil
+		cmd.Stderr = nil
+		if err := cmd.Start(); err != nil {
+			return fmt.Errorf("failed to schedule restart: %w", err)
+		}
+	} else {
+		// For Unix-like systems, use a shell script with sleep and exec
+		cmd := exec.Command("sh", "-c", fmt.Sprintf("sleep %d && exec \"%s\" &", delaySeconds, exePath))
+		cmd.Stdout = nil
+		cmd.Stderr = nil
+		if err := cmd.Start(); err != nil {
+			return fmt.Errorf("failed to schedule restart: %w", err)
+		}
+	}
+
+	return nil
 }

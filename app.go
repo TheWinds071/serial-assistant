@@ -568,6 +568,17 @@ func (a *App) DownloadAndInstallUpdate(downloadURL string) error {
 	// Clean up temp file
 	os.Remove(tempFile)
 
+	// Close all connections before restart
+	a.Close()
+
+	// Schedule restart after 1 second delay
+	if err := updater.RestartApplication(1); err != nil {
+		return fmt.Errorf("failed to schedule restart: %w", err)
+	}
+
+	// Quit the application (new instance will start after delay)
+	runtime.Quit(a.ctx)
+
 	return nil
 }
 

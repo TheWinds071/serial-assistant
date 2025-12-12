@@ -219,7 +219,7 @@ const downloadAndInstall = async () => {
   
   try {
     await DownloadAndInstallUpdate(updateInfo.downloadUrl);
-    showModal('更新成功', '请手动重启应用以使用新版本。', 'success');
+    showModal('更新成功', '应用将自动重启以使用新版本...', 'success');
     updateProgress.downloading = false;
   } catch (error) {
     updateProgress.downloading = false;
