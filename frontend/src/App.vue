@@ -967,7 +967,12 @@ const scrollToBottom = () => {
   10%, 30%, 50%, 70%, 90% { transform: translateX(-4px); }
   20%, 40%, 60%, 80% { transform: translateX(4px); }
 }
-.shake-anim { animation: shake-x 0.4s cubic-bezier(0.36, 0.07, 0.19, 0.97) both; border-color: rgba(239, 68, 68, 0.5); }
+.shake-anim { 
+  animation: shake-x 0.4s cubic-bezier(0.36, 0.07, 0.19, 0.97) both; 
+  background-color: rgba(239, 68, 68, 0.15) !important; 
+  border: 2px solid rgba(239, 68, 68, 0.6) !important; 
+  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.2);
+}
 
 @keyframes broom-sweep {
   0%, 100% { transform: rotate(0deg) translateX(0); }

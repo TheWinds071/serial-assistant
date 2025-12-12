@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -200,16 +201,32 @@ func (a *App) jlinkReadLoop() {
 			data, err := jl.ReadRTT()
 			if err != nil {
 				consecutiveErrors++
+				
+				// 检测是否是偏移量错误（STM32 复位导致）
+				errMsg := err.Error()
+				if consecutiveErrors == 1 && (bytes.Contains([]byte(errMsg), []byte("offset out of bounds")) || 
+					bytes.Contains([]byte(errMsg), []byte("偏移量超出范围"))) {
+					runtime.EventsEmit(a.ctx, "sys-msg", "[RTT] 检测到目标设备可能已复位，尝试重新连接...")
+					// 尝试重新初始化 RTT
+					if reinitErr := jl.ReinitSoftRTT(); reinitErr == nil {
+						runtime.EventsEmit(a.ctx, "sys-msg", "[RTT] RTT 重新初始化成功")
+						consecutiveErrors = 0
+						continue
+					} else {
+						runtime.EventsEmit(a.ctx, "sys-msg", fmt.Sprintf("[RTT] RTT 重新初始化失败: %v", reinitErr))
+					}
+				}
+				
 				// 增加容错机制：只有连续多次错误才关闭连接
 				// 这样可以避免偶发错误导致断连，同时确保持续错误时能及时断开
 				if consecutiveErrors >= maxConsecutiveErrors {
-					runtime.EventsEmit(a.ctx, "serial-error", fmt.Sprintf("RTT Error (连续 %d 次): %v", consecutiveErrors, err))
+					runtime.EventsEmit(a.ctx, "serial-error", fmt.Sprintf("[RTT] 错误 (连续 %d 次): %v", consecutiveErrors, err))
 					a.Close()
 					return
 				}
 				// 首次或少量错误时，仅记录日志，继续尝试
 				if consecutiveErrors == 1 {
-					runtime.EventsEmit(a.ctx, "sys-msg", fmt.Sprintf("RTT 读取警告: %v", err))
+					runtime.EventsEmit(a.ctx, "sys-msg", fmt.Sprintf("[RTT] 读取警告: %v", err))
 				}
 				continue
 			}
