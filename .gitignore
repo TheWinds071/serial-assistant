@@ -4,3 +4,5 @@ frontend/dist
 .idea
 *.test
 *.test.exe
+*.deb
+*.rpm

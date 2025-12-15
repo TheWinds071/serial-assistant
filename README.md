@@ -57,4 +57,72 @@
 * **前端 (Frontend)**: TypeScript
     * 框架: Vue 3 (Composition API)
     * 构建工具: Vite 6
-    * 样式库: **Tailwind CSS v4** 
+    * 样式库: **Tailwind CSS v4**
+
+## 📦 安装 (Installation)
+
+### Windows & macOS
+
+从 [Releases](https://github.com/TheWinds071/serial-mate/releases) 页面下载对应平台的安装包：
+* **Windows**: 下载 `.exe` 文件直接运行
+* **macOS**: 下载 `.app.zip` 文件解压后运行
+
+### Linux
+
+#### 推荐：使用包管理器安装
+
+Serial Mate 提供了针对不同 Linux 发行版的原生包，推荐通过包管理器安装以获得最佳体验：
+
+**Ubuntu / Debian:**
+
+```bash
+# Ubuntu 22.04 / Debian 12 (webkit 4.0)
+wget https://github.com/TheWinds071/serial-mate/releases/download/vX.X.X/serial-mate-X.X.X-ubuntu-22.04-amd64.deb
+sudo dpkg -i serial-mate-X.X.X-ubuntu-22.04-amd64.deb
+sudo apt-get install -f  # 自动安装依赖
+
+# Ubuntu 24.04 及更新版本 (webkit 4.1)
+wget https://github.com/TheWinds071/serial-mate/releases/download/vX.X.X/serial-mate-X.X.X-ubuntu-24.04-amd64.deb
+sudo dpkg -i serial-mate-X.X.X-ubuntu-24.04-amd64.deb
+sudo apt-get install -f
+```
+
+**Fedora:**
+
+```bash
+# Fedora 40/41
+sudo dnf install https://github.com/TheWinds071/serial-mate/releases/download/vX.X.X/serial-mate-X.X.X-fedora40-amd64.rpm
+```
+
+安装后，可以从应用菜单启动 Serial Mate，或在终端运行：
+
+```bash
+serial-mate
+```
+
+#### 使用原始二进制文件
+
+如果您的发行版不在上述列表中，也可以下载原始二进制文件：
+
+```bash
+# 下载二进制文件
+wget https://github.com/TheWinds071/serial-mate/releases/download/vX.X.X/serial-mate-linux-amd64
+chmod +x serial-mate-linux-amd64
+./serial-mate-linux-amd64
+```
+
+**注意**: 运行原始二进制文件需要系统已安装 WebKitGTK 库。根据您的发行版安装对应依赖：
+
+```bash
+# Ubuntu 22.04 / Debian 12
+sudo apt-get install libgtk-3-0 libwebkit2gtk-4.0-37
+
+# Ubuntu 24.04 及更新版本
+sudo apt-get install libgtk-3-0 libwebkit2gtk-4.1-0
+
+# Fedora
+sudo dnf install gtk3 webkit2gtk4.1
+
+# Arch Linux
+sudo pacman -S gtk3 webkit2gtk
+``` 
