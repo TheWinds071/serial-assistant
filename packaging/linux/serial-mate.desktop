@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=Serial Mate
+Comment=Modern serial port debugging tool
+Exec=serial-mate
+Icon=serial-mate
+Terminal=false
+Type=Application
+Categories=Development;Utility;
+Keywords=serial;uart;debug;terminal;
+StartupNotify=true
