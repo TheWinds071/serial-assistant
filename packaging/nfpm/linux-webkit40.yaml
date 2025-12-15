@@ -31,13 +31,12 @@ contents:
       mode: 0644
 
 # Dependencies for Debian/Ubuntu with webkit 4.0
-deb:
-  depends:
-    - libgtk-3-0
-    - libwebkit2gtk-4.0-37
-
-# Dependencies for RPM-based distros (CentOS/RHEL compatible with webkit 4.0)
-rpm:
-  depends:
-    - gtk3
-    - webkit2gtk3
+overrides:
+  deb:
+    dependencies:
+      - libgtk-3-0
+      - libwebkit2gtk-4.0-37
+  rpm:
+    dependencies:
+      - gtk3
+      - webkit2gtk3

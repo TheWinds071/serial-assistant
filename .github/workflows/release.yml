@@ -77,7 +77,11 @@ jobs:
       # 执行构建 (已修复：移除了 -buildmode production，增加了 -clean)
       - name: Build Application
         run: |
-          wails build -platform ${{ matrix.platform }} -clean
+          if [ "${{ matrix.webkit_version }}" = "4.1" ]; then
+            wails build -platform ${{ matrix.platform }} -tags webkit2gtk_4_1 -clean
+          else
+            wails build -platform ${{ matrix.platform }} -clean
+          fi
 
       # 处理 Windows 产物
       - name: Prepare Windows Asset
@@ -207,7 +211,7 @@ jobs:
 
       - name: Build Application
         run: |
-          $HOME/go/bin/wails build -platform linux/amd64 -clean
+          $HOME/go/bin/wails build -platform linux/amd64 -tags webkit2gtk_4_1 -clean
 
       - name: Install nfpm
         run: |

@@ -32,10 +32,10 @@ contents:
 
 overrides:
   deb:
-    depends:
+    dependencies:
       - libgtk-3-0
       - libwebkit2gtk-4.1-0
   rpm:
-    depends:
+    dependencies:
       - gtk3
       - webkit2gtk4.1
