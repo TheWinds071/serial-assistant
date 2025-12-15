@@ -33,10 +33,10 @@ contents:
 # Dependencies for Debian/Ubuntu with webkit 4.0
 overrides:
   deb:
-    dependencies:
+    depends:
       - libgtk-3-0
       - libwebkit2gtk-4.0-37
   rpm:
-    dependencies:
+    depends:
       - gtk3
       - webkit2gtk3

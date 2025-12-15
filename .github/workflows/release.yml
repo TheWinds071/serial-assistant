@@ -76,6 +76,7 @@ jobs:
 
       # 执行构建 (已修复：移除了 -buildmode production，增加了 -clean)
       - name: Build Application
+        shell: bash
         run: |
           if [ "${{ matrix.webkit_version }}" = "4.1" ]; then
             wails build -platform ${{ matrix.platform }} -tags webkit2gtk_4_1 -clean
