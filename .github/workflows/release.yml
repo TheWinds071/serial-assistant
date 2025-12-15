@@ -75,14 +75,12 @@ jobs:
           sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev
 
       # 执行构建 (已修复：移除了 -buildmode production，增加了 -clean)
+      # Note: 不使用 -tags webkit2gtk_4_1 因为 Wails v2.11.0 该标签存在 pkg-config 路径问题
+      # Wails 会自动检测系统安装的 webkit2gtk 版本
       - name: Build Application
         shell: bash
         run: |
-          if [ "${{ matrix.webkit_version }}" = "4.1" ]; then
-            wails build -platform ${{ matrix.platform }} -tags webkit2gtk_4_1 -clean
-          else
-            wails build -platform ${{ matrix.platform }} -clean
-          fi
+          wails build -platform ${{ matrix.platform }} -clean
 
       # 处理 Windows 产物
       - name: Prepare Windows Asset
@@ -181,12 +179,18 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        fedora_version: [40, 41]
+        include:
+          - fedora_version: 40
+            webkit_package: webkit2gtk4.0-devel
+            nfpm_config: linux-webkit40.yaml
+          - fedora_version: 41
+            webkit_package: webkit2gtk4.1-devel
+            nfpm_config: linux-webkit41.yaml
     
     steps:
       - name: Install build dependencies
         run: |
-          dnf install -y git golang nodejs npm gtk3-devel webkit2gtk4.1-devel gcc-c++ make tar gzip
+          dnf install -y git golang nodejs npm gtk3-devel ${{ matrix.webkit_package }} gcc-c++ make tar gzip
 
       - name: Checkout code
         uses: actions/checkout@v4
@@ -212,7 +216,7 @@ jobs:
 
       - name: Build Application
         run: |
-          $HOME/go/bin/wails build -platform linux/amd64 -tags webkit2gtk_4_1 -clean
+          $HOME/go/bin/wails build -platform linux/amd64 -clean
 
       - name: Install nfpm
         run: |
@@ -227,7 +231,7 @@ jobs:
           export VERSION
           
           # Create .rpm package
-          nfpm package --packager rpm --config packaging/nfpm/linux-webkit41.yaml --target .
+          nfpm package --packager rpm --config packaging/nfpm/${{ matrix.nfpm_config }} --target .
           
           # Rename with version and distro
           mv serial-mate-${VERSION}.x86_64.rpm serial-mate-${VERSION}-fedora${{ matrix.fedora_version }}-amd64.rpm
