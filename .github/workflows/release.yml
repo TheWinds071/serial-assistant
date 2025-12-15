@@ -90,7 +90,6 @@ jobs:
       - name: Install nfpm
         if: matrix.distro != ''
         run: |
-          curl -sfL https://goreleaser.com/static/run | bash -s -- --snapshot --clean
           echo "deb [trusted=yes] https://repo.goreleaser.com/apt/ /" | sudo tee /etc/apt/sources.list.d/goreleaser.list
           sudo apt-get update
           sudo apt-get install -y nfpm
