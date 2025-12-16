@@ -23,28 +23,19 @@ jobs:
       image: fedora:41
     
     steps:
-      - name: Install Git and Basic Tools
+      - name: Install Build Dependencies
         run: |
-          dnf install -y git tar gzip xz findutils which
+          # Install all required packages in a single dnf command
+          dnf install -y \
+            git tar gzip xz lzma findutils which \
+            golang nodejs npm \
+            gcc gcc-c++ make pkgconfig \
+            gtk3-devel webkit2gtk4.1-devel
 
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           fetch-depth: '0'
-
-      - name: Install Build Dependencies
-        run: |
-          # Install Go
-          dnf install -y golang
-          
-          # Install Node.js 20
-          dnf install -y nodejs npm
-          
-          # Install GTK3 and WebKitGTK 4.1 development packages
-          dnf install -y gcc gcc-c++ make pkgconfig gtk3-devel webkit2gtk4.1-devel
-          
-          # Install additional required packages
-          dnf install -y git tar gzip xz lzma
 
       - name: Install Wails
         run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
@@ -96,7 +87,6 @@ jobs:
       - name: Install nfpm
         run: |
           go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest
-          export PATH=$PATH:/root/go/bin
 
       - name: Generate Fedora RPM
         env:
@@ -107,7 +97,7 @@ jobs:
           mkdir -p dist/packages
           
           # Generate .rpm package for Fedora with WebKitGTK 4.1
-          nfpm package \
+          /root/go/bin/nfpm package \
             --config packaging/nfpm-fedora-rpm.yaml \
             --packager rpm \
             --target dist/packages/serial-mate-${{ steps.version.outputs.version }}-1.fc40.amd64.rpm
