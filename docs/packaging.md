@@ -11,17 +11,36 @@ This document explains how to build and install Serial Mate packages in differen
 
 ## Installation from Packages
 
-### Debian/Ubuntu (.deb)
+### Fedora 40+ (.rpm with WebKitGTK 4.1)
 
-Download the `.deb` package from the [GitHub Releases](https://github.com/TheWinds071/serial-mate/releases) page, then install:
+Download the Fedora `.rpm` package from the [GitHub Releases](https://github.com/TheWinds071/serial-mate/releases) page (look for `.fc40.amd64.rpm`), then install:
+
+```bash
+# Using dnf
+sudo dnf install serial-mate-<version>-1.fc40.amd64.rpm
+```
+
+This package is built on Fedora 41 with WebKitGTK 4.1 and will work on Fedora 40 and newer versions.
+
+To uninstall:
+
+```bash
+sudo dnf remove serial-mate
+```
+
+### Ubuntu 24.04+ (.deb with WebKitGTK 4.1)
+
+Download the Ubuntu 24.04 `.deb` package from the [GitHub Releases](https://github.com/TheWinds071/serial-mate/releases) page (look for `_ubuntu24.04_amd64.deb`), then install:
 
 ```bash
 # Install the package
-sudo dpkg -i serial-mate_<version>_amd64.deb
+sudo dpkg -i serial-mate_<version>_ubuntu24.04_amd64.deb
 
 # If there are missing dependencies, install them
 sudo apt-get install -f
 ```
+
+This package is built on Ubuntu 24.04 with WebKitGTK 4.1 and requires `libwebkit2gtk-4.1-0`.
 
 To uninstall:
 
@@ -29,29 +48,24 @@ To uninstall:
 sudo apt-get remove serial-mate
 ```
 
-### RHEL/Fedora/CentOS (.rpm)
+### Ubuntu 22.04 (.deb with WebKitGTK 4.0, legacy)
 
-Download the `.rpm` package from the [GitHub Releases](https://github.com/TheWinds071/serial-mate/releases) page, then install:
+Download the Ubuntu 22.04 `.deb` package from the [GitHub Releases](https://github.com/TheWinds071/serial-mate/releases) page (look for `_ubuntu22.04_amd64.deb`), then install:
 
 ```bash
-# Using rpm
-sudo rpm -i serial-mate-<version>-1.amd64.rpm
+# Install the package
+sudo dpkg -i serial-mate_<version>_ubuntu22.04_amd64.deb
 
-# Or using dnf (Fedora/newer RHEL)
-sudo dnf install serial-mate-<version>-1.amd64.rpm
-
-# Or using yum (older RHEL/CentOS)
-sudo yum install serial-mate-<version>-1.amd64.rpm
+# If there are missing dependencies, install them
+sudo apt-get install -f
 ```
+
+This package is built on Ubuntu 22.04 with WebKitGTK 4.0 and requires `libwebkit2gtk-4.0-37`.
 
 To uninstall:
 
 ```bash
-# Using rpm
-sudo rpm -e serial-mate
-
-# Or using dnf/yum
-sudo dnf remove serial-mate
+sudo apt-get remove serial-mate
 ```
 
 ### Manual Installation (.tar.gz)
@@ -101,34 +115,143 @@ sudo rm /usr/local/bin/serial-mate
 
 4. **Install nfpm**:
    ```bash
-   curl -sfL https://goreleaser.com/static/run | bash -s -- install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest
+   go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest
    ```
 
-5. **Install Linux build dependencies** (Ubuntu/Debian):
+### Building on Fedora 40+ (for RPM with WebKitGTK 4.1)
+
+5. **Install build dependencies on Fedora**:
+   ```bash
+   sudo dnf install -y golang nodejs npm gcc gcc-c++ make pkgconfig gtk3-devel webkit2gtk4.1-devel
+   ```
+
+6. **Build the application**:
+   ```bash
+   # Clone the repository
+   git clone https://github.com/TheWinds071/serial-mate.git
+   cd serial-mate
+   
+   # Build frontend
+   cd frontend
+   npm install
+   npm run build
+   cd ..
+   
+   # Build the Wails application
+   wails build -platform linux/amd64 -clean
+   
+   # Copy binary to dist directory
+   mkdir -p dist
+   cp build/bin/serial-mate dist/serial-mate
+   ```
+
+7. **Validate WebKitGTK linking**:
+   ```bash
+   # Verify it links to WebKitGTK 4.1
+   readelf -d dist/serial-mate | grep -E 'NEEDED.*webkit'
+   # Should show libwebkit2gtk-4.1.so
+   ```
+
+8. **Generate Fedora RPM**:
+   ```bash
+   # Set version
+   export NFPM_VERSION="1.3.5"
+   export NFPM_ARCH="amd64"
+   
+   # Create output directory
+   mkdir -p dist/packages
+   
+   # Generate .rpm package
+   nfpm package \
+     --config packaging/nfpm-fedora-rpm.yaml \
+     --packager rpm \
+     --target dist/packages/serial-mate-${NFPM_VERSION}-1.fc40.amd64.rpm
+   ```
+
+### Building on Ubuntu 24.04+ (for DEB with WebKitGTK 4.1)
+
+5. **Install build dependencies on Ubuntu 24.04**:
+   ```bash
+   sudo apt-get update
+   sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev
+   ```
+
+6. **Build the application**:
+   ```bash
+   # Clone the repository
+   git clone https://github.com/TheWinds071/serial-mate.git
+   cd serial-mate
+   
+   # Build frontend
+   cd frontend
+   npm install
+   npm run build
+   cd ..
+   
+   # Build the Wails application
+   wails build -platform linux/amd64 -clean
+   
+   # Copy binary to dist directory
+   mkdir -p dist
+   cp build/bin/serial-mate dist/serial-mate
+   ```
+
+7. **Validate WebKitGTK linking**:
+   ```bash
+   # Verify it links to WebKitGTK 4.1
+   readelf -d dist/serial-mate | grep -E 'NEEDED.*webkit'
+   # Should show libwebkit2gtk-4.1.so
+   ```
+
+8. **Generate Ubuntu 24.04 DEB**:
+   ```bash
+   # Set version
+   export NFPM_VERSION="1.3.5"
+   export NFPM_ARCH="amd64"
+   
+   # Create output directory
+   mkdir -p dist/packages
+   
+   # Generate .deb package
+   nfpm package \
+     --config packaging/nfpm-ubuntu24-deb.yaml \
+     --packager deb \
+     --target dist/packages/serial-mate_${NFPM_VERSION}_ubuntu24.04_amd64.deb
+   ```
+
+### Building on Ubuntu 22.04 (for DEB with WebKitGTK 4.0, legacy)
+
+5. **Install build dependencies on Ubuntu 22.04**:
    ```bash
    sudo apt-get update
    sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.0-dev
    ```
 
-### Build Process
-
-1. **Clone the repository**:
+6. **Build the application**:
    ```bash
+   # Clone the repository
    git clone https://github.com/TheWinds071/serial-mate.git
    cd serial-mate
-   ```
-
-2. **Build the application**:
-   ```bash
+   
+   # Build frontend
+   cd frontend
+   npm install
+   npm run build
+   cd ..
+   
+   # Build the Wails application
    wails build -platform linux/amd64 -clean
+   
+   # Copy binary to dist directory
+   mkdir -p dist
+   cp build/bin/serial-mate dist/serial-mate
    ```
 
-3. **Generate packages**:
+7. **Generate Ubuntu 22.04 DEB**:
    ```bash
-   # Set version (or use git tag)
+   # Set version
    export NFPM_VERSION="1.3.5"
    export NFPM_ARCH="amd64"
-   export NFPM_BINARY_PATH="./build/bin/serial-mate"
    
    # Create output directory
    mkdir -p dist/packages
@@ -137,24 +260,25 @@ sudo rm /usr/local/bin/serial-mate
    nfpm package \
      --config packaging/nfpm.yaml \
      --packager deb \
-     --target dist/packages/serial-mate_${NFPM_VERSION}_${NFPM_ARCH}.deb
-   
-   # Generate .rpm package
-   nfpm package \
-     --config packaging/nfpm.yaml \
-     --packager rpm \
-     --target dist/packages/serial-mate-${NFPM_VERSION}-1.${NFPM_ARCH}.rpm
-   
-   # Generate .tar.gz archive
-   cd build/bin
-   tar -czf ../../dist/packages/serial-mate-${NFPM_VERSION}-linux-${NFPM_ARCH}.tar.gz serial-mate
-   cd ../..
+     --target dist/packages/serial-mate_${NFPM_VERSION}_ubuntu22.04_amd64.deb
    ```
 
-4. **Packages will be available in** `dist/packages/`:
-   - `serial-mate_<version>_amd64.deb`
-   - `serial-mate-<version>-1.amd64.rpm`
-   - `serial-mate-<version>-linux-amd64.tar.gz`
+### Generate tar.gz Archive
+
+```bash
+# Generate .tar.gz archive (can be done from any build)
+cd dist
+tar -czf packages/serial-mate-${NFPM_VERSION}-linux-amd64.tar.gz serial-mate
+cd ..
+```
+
+### Build Output
+
+Packages will be available in `dist/packages/`:
+- `serial-mate-<version>-1.fc40.amd64.rpm` (Fedora 40+ with WebKitGTK 4.1)
+- `serial-mate_<version>_ubuntu24.04_amd64.deb` (Ubuntu 24.04+ with WebKitGTK 4.1)
+- `serial-mate_<version>_ubuntu22.04_amd64.deb` (Ubuntu 22.04 with WebKitGTK 4.0)
+- `serial-mate-<version>-linux-amd64.tar.gz` (binary only)
 
 ## Package Contents
 
@@ -172,15 +296,19 @@ The `.tar.gz` archive contains only the binary file.
 
 ### Runtime Dependencies
 
-Serial Mate requires the following runtime dependencies:
+Serial Mate requires the following runtime dependencies depending on the distribution and WebKitGTK version:
 
-**Debian/Ubuntu:**
-- `libgtk-3-0` - GTK+ 3 library
-- `libwebkit2gtk-4.0-37` - WebKit2GTK library
-
-**RHEL/Fedora/CentOS:**
+**Fedora 40+ (WebKitGTK 4.1):**
 - `gtk3` - GTK+ 3 library
-- `webkit2gtk4.1` - WebKit2GTK library
+- `webkit2gtk4.1` - WebKit2GTK 4.1 library
+
+**Ubuntu 24.04+ (WebKitGTK 4.1):**
+- `libgtk-3-0` - GTK+ 3 library
+- `libwebkit2gtk-4.1-0` - WebKit2GTK 4.1 library
+
+**Ubuntu 22.04 (WebKitGTK 4.0, legacy):**
+- `libgtk-3-0` - GTK+ 3 library
+- `libwebkit2gtk-4.0-37` - WebKit2GTK 4.0 library
 
 These dependencies are automatically installed when using `.deb` or `.rpm` packages.
 
@@ -188,13 +316,33 @@ These dependencies are automatically installed when using `.deb` or `.rpm` packa
 
 For building from source, you need:
 
-**Debian/Ubuntu:**
-- `libgtk-3-dev`
-- `libwebkit2gtk-4.0-dev`
-
-**RHEL/Fedora/CentOS:**
+**Fedora 40+ (WebKitGTK 4.1):**
 - `gtk3-devel`
 - `webkit2gtk4.1-devel`
+- `gcc`, `gcc-c++`, `make`, `pkgconfig`
+- `golang`, `nodejs`, `npm`
+
+**Ubuntu 24.04+ (WebKitGTK 4.1):**
+- `libgtk-3-dev`
+- `libwebkit2gtk-4.1-dev`
+- `build-essential`
+- `golang`, `nodejs`, `npm`
+
+**Ubuntu 22.04 (WebKitGTK 4.0, legacy):**
+- `libgtk-3-dev`
+- `libwebkit2gtk-4.0-dev`
+- `build-essential`
+- `golang`, `nodejs`, `npm`
+
+## WebKitGTK Version Compatibility
+
+Serial Mate is built against different WebKitGTK versions depending on the target distribution:
+
+- **Fedora 40+**: Uses WebKitGTK 4.1 (webkit2gtk4.1)
+- **Ubuntu 24.04+**: Uses WebKitGTK 4.1 (libwebkit2gtk-4.1-0)
+- **Ubuntu 22.04**: Uses WebKitGTK 4.0 (libwebkit2gtk-4.0-37)
+
+**Important:** Make sure to download the correct package for your distribution. Using the wrong package will result in missing library errors at runtime.
 
 ## Troubleshooting
 
@@ -206,19 +354,35 @@ If you get "Permission denied" when running serial-mate, ensure the binary is ex
 sudo chmod +x /usr/bin/serial-mate
 ```
 
-### Missing Dependencies
+### Missing Dependencies / Library Not Found
 
-If the application fails to start due to missing dependencies:
+If the application fails to start with errors like "libwebkit2gtk-4.1.so.0: cannot open shared object file" or similar:
 
-**Debian/Ubuntu:**
-```bash
-sudo apt-get install -f
-```
+1. **Verify you're using the correct package for your distribution:**
+   - Fedora 40+: Use `.fc40.amd64.rpm`
+   - Ubuntu 24.04+: Use `_ubuntu24.04_amd64.deb`
+   - Ubuntu 22.04: Use `_ubuntu22.04_amd64.deb`
 
-**RHEL/Fedora/CentOS:**
-```bash
-sudo dnf install gtk3 webkit2gtk4.1
-```
+2. **Install missing dependencies:**
+
+   **Fedora:**
+   ```bash
+   sudo dnf install gtk3 webkit2gtk4.1
+   ```
+
+   **Ubuntu 24.04+:**
+   ```bash
+   sudo apt-get install -f
+   # Or manually:
+   sudo apt-get install libgtk-3-0 libwebkit2gtk-4.1-0
+   ```
+
+   **Ubuntu 22.04:**
+   ```bash
+   sudo apt-get install -f
+   # Or manually:
+   sudo apt-get install libgtk-3-0 libwebkit2gtk-4.0-37
+   ```
 
 ### Desktop Entry Not Showing
 

@@ -15,17 +15,221 @@ permissions:
   contents: write
 
 jobs:
-  build-linux-packages:
-    name: Build Linux Packages (${{ matrix.arch }})
-    runs-on: ubuntu-22.04
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: amd64
-            go_arch: amd64
-            nfpm_arch: amd64
+  # Fedora 40+ RPM build with WebKitGTK 4.1
+  build-fedora-rpm:
+    name: Build Fedora RPM (WebKitGTK 4.1)
+    runs-on: ubuntu-latest
+    container:
+      image: fedora:41
+    
+    steps:
+      - name: Install Git and Basic Tools
+        run: |
+          dnf install -y git tar gzip xz findutils which
 
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: '0'
+
+      - name: Install Build Dependencies
+        run: |
+          # Install Go
+          dnf install -y golang
+          
+          # Install Node.js 20
+          dnf install -y nodejs npm
+          
+          # Install GTK3 and WebKitGTK 4.1 development packages
+          dnf install -y gcc gcc-c++ make pkgconfig gtk3-devel webkit2gtk4.1-devel
+          
+          # Install additional required packages
+          dnf install -y git tar gzip xz lzma
+
+      - name: Install Wails
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
+
+      - name: Build Frontend
+        run: |
+          cd frontend
+          npm install
+          npm run build
+
+      - name: Build Go Binary
+        env:
+          CGO_ENABLED: 1
+          GOOS: linux
+          GOARCH: amd64
+        run: |
+          export PATH=$PATH:/root/go/bin
+          wails build -platform linux/amd64 -clean
+          mkdir -p dist
+          cp build/bin/serial-mate dist/serial-mate
+
+      - name: Validate WebKitGTK Linking
+        run: |
+          echo "Checking WebKitGTK linking..."
+          readelf -d dist/serial-mate | grep -E 'NEEDED.*webkit' || true
+          if readelf -d dist/serial-mate | grep -E 'NEEDED.*libwebkit2gtk-4\.1'; then
+            echo "✓ Binary correctly links to WebKitGTK 4.1"
+          else
+            echo "✗ Binary does not link to WebKitGTK 4.1"
+            exit 1
+          fi
+          if readelf -d dist/serial-mate | grep -E 'NEEDED.*libwebkit2gtk-4\.0'; then
+            echo "✗ Binary incorrectly links to WebKitGTK 4.0"
+            exit 1
+          fi
+
+      - name: Determine Version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+          else
+            # Extract version from tag (remove 'v' prefix)
+            VERSION="${GITHUB_REF#refs/tags/v}"
+          fi
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "Building version: ${VERSION}"
+
+      - name: Install nfpm
+        run: |
+          go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest
+          export PATH=$PATH:/root/go/bin
+
+      - name: Generate Fedora RPM
+        env:
+          NFPM_VERSION: ${{ steps.version.outputs.version }}
+          NFPM_ARCH: amd64
+        run: |
+          export PATH=$PATH:/root/go/bin
+          mkdir -p dist/packages
+          
+          # Generate .rpm package for Fedora with WebKitGTK 4.1
+          nfpm package \
+            --config packaging/nfpm-fedora-rpm.yaml \
+            --packager rpm \
+            --target dist/packages/serial-mate-${{ steps.version.outputs.version }}-1.fc40.amd64.rpm
+          
+          # List generated packages
+          echo "Generated Fedora RPM:"
+          ls -lh dist/packages/
+
+      - name: Upload Fedora RPM Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: fedora-rpm-amd64
+          path: dist/packages/*.rpm
+          retention-days: 30
+
+  # Ubuntu 24.04 DEB build with WebKitGTK 4.1
+  build-ubuntu24-deb:
+    name: Build Ubuntu 24.04 DEB (WebKitGTK 4.1)
+    runs-on: ubuntu-24.04
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: '0'
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+          check-latest: true
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Wails
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
+
+      - name: Install Linux Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev
+
+      - name: Build Frontend
+        run: |
+          cd frontend
+          npm install
+          npm run build
+
+      - name: Build Go Binary
+        env:
+          CGO_ENABLED: 1
+          GOOS: linux
+          GOARCH: amd64
+        run: |
+          wails build -platform linux/amd64 -clean
+          mkdir -p dist
+          cp build/bin/serial-mate dist/serial-mate
+
+      - name: Validate WebKitGTK Linking
+        run: |
+          echo "Checking WebKitGTK linking..."
+          readelf -d dist/serial-mate | grep -E 'NEEDED.*webkit' || true
+          if readelf -d dist/serial-mate | grep -E 'NEEDED.*libwebkit2gtk-4\.1'; then
+            echo "✓ Binary correctly links to WebKitGTK 4.1"
+          else
+            echo "✗ Binary does not link to WebKitGTK 4.1"
+            exit 1
+          fi
+          if readelf -d dist/serial-mate | grep -E 'NEEDED.*libwebkit2gtk-4\.0'; then
+            echo "✗ Binary incorrectly links to WebKitGTK 4.0"
+            exit 1
+          fi
+
+      - name: Determine Version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+          else
+            # Extract version from tag (remove 'v' prefix)
+            VERSION="${GITHUB_REF#refs/tags/v}"
+          fi
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "Building version: ${VERSION}"
+
+      - name: Install nfpm
+        run: |
+          go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest
+          echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
+
+      - name: Generate Ubuntu 24.04 DEB
+        env:
+          NFPM_VERSION: ${{ steps.version.outputs.version }}
+          NFPM_ARCH: amd64
+        run: |
+          mkdir -p dist/packages
+          
+          # Generate .deb package for Ubuntu 24.04 with WebKitGTK 4.1
+          nfpm package \
+            --config packaging/nfpm-ubuntu24-deb.yaml \
+            --packager deb \
+            --target dist/packages/serial-mate_${{ steps.version.outputs.version }}_ubuntu24.04_amd64.deb
+          
+          # List generated packages
+          echo "Generated Ubuntu 24.04 DEB:"
+          ls -lh dist/packages/
+
+      - name: Upload Ubuntu 24.04 DEB Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ubuntu24-deb-amd64
+          path: dist/packages/*.deb
+          retention-days: 30
+
+  # Ubuntu 22.04 packages (legacy, WebKitGTK 4.0)
+  build-ubuntu22-packages:
+    name: Build Ubuntu 22.04 Packages (WebKitGTK 4.0, legacy)
+    runs-on: ubuntu-22.04
+    
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -50,12 +254,6 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.0-dev
-          # For cross-compilation to arm64
-          if [ "${{ matrix.arch }}" = "arm64" ]; then
-            sudo dpkg --add-architecture arm64
-            sudo apt-get update
-            sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
-          fi
 
       - name: Build Frontend
         run: |
@@ -67,26 +265,11 @@ jobs:
         env:
           CGO_ENABLED: 1
           GOOS: linux
-          GOARCH: ${{ matrix.go_arch }}
+          GOARCH: amd64
         run: |
-          if [ "${{ matrix.arch }}" = "arm64" ]; then
-            export CC=aarch64-linux-gnu-gcc
-            export CXX=aarch64-linux-gnu-g++
-          fi
-          
-          # Build using wails for amd64 (native compilation)
-          if [ "${{ matrix.arch }}" = "amd64" ]; then
-            wails build -platform linux/amd64 -clean
-            mkdir -p dist
-            cp build/bin/serial-mate dist/serial-mate
-          else
-            # For arm64, we'll do a simple go build since cross-compiling Wails is complex
-            # and requires arm64 GTK/WebKit libraries
-            echo "Skipping arm64 build - requires native arm64 build environment"
-            mkdir -p dist
-            # Create a placeholder to not break the workflow
-            touch dist/serial-mate-${{ matrix.arch }}.placeholder
-          fi
+          wails build -platform linux/amd64 -clean
+          mkdir -p dist
+          cp build/bin/serial-mate dist/serial-mate
 
       - name: Determine Version
         id: version
@@ -101,73 +284,108 @@ jobs:
           echo "Building version: ${VERSION}"
 
       - name: Install nfpm
-        if: matrix.arch == 'amd64'
         run: |
           go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest
           echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
 
       - name: Generate Packages with nfpm
-        if: matrix.arch == 'amd64'
         env:
           NFPM_VERSION: ${{ steps.version.outputs.version }}
-          NFPM_ARCH: ${{ matrix.nfpm_arch }}
+          NFPM_ARCH: amd64
         run: |
           mkdir -p dist/packages
           
-          # Generate .deb package
+          # Generate .deb package for Ubuntu 22.04 with WebKitGTK 4.0
           nfpm package \
             --config packaging/nfpm.yaml \
             --packager deb \
-            --target dist/packages/serial-mate_${{ steps.version.outputs.version }}_${{ matrix.arch }}.deb
-          
-          # Generate .rpm package
-          nfpm package \
-            --config packaging/nfpm.yaml \
-            --packager rpm \
-            --target dist/packages/serial-mate-${{ steps.version.outputs.version }}-1.${{ matrix.arch }}.rpm
+            --target dist/packages/serial-mate_${{ steps.version.outputs.version }}_ubuntu22.04_amd64.deb
           
           # Generate .tar.gz archive (contains binary only)
           cd dist
-          tar -czf packages/serial-mate-${{ steps.version.outputs.version }}-linux-${{ matrix.arch }}.tar.gz serial-mate
+          tar -czf packages/serial-mate-${{ steps.version.outputs.version }}-linux-amd64.tar.gz serial-mate
           cd ..
           
           # List generated packages
           echo "Generated packages:"
           ls -lh dist/packages/
 
-      - name: Upload Artifacts
-        if: matrix.arch == 'amd64'
+      - name: Upload Ubuntu 22.04 Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: linux-packages-${{ matrix.arch }}
+          name: ubuntu22-packages-amd64
           path: dist/packages/*
           retention-days: 30
 
+  # Release job to collect all artifacts and publish
+  release:
+    name: Create GitHub Release
+    needs: [build-fedora-rpm, build-ubuntu24-deb, build-ubuntu22-packages]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Determine Version
+        id: version
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "Release version: ${VERSION}"
+
+      - name: Download Fedora RPM
+        uses: actions/download-artifact@v4
+        with:
+          name: fedora-rpm-amd64
+          path: release-assets
+
+      - name: Download Ubuntu 24.04 DEB
+        uses: actions/download-artifact@v4
+        with:
+          name: ubuntu24-deb-amd64
+          path: release-assets
+
+      - name: Download Ubuntu 22.04 Packages
+        uses: actions/download-artifact@v4
+        with:
+          name: ubuntu22-packages-amd64
+          path: release-assets
+
+      - name: List Release Assets
+        run: |
+          echo "Release assets:"
+          ls -lh release-assets/
+
       - name: Create Release and Upload Assets
-        if: startsWith(github.ref, 'refs/tags/') && matrix.arch == 'amd64'
         uses: softprops/action-gh-release@v1
         with:
-          files: dist/packages/*
+          files: release-assets/*
           draft: false
           prerelease: false
           body: |
             ## Linux Packages
             
-            This release includes multiple package formats for easy installation:
+            This release includes packages built for different distributions with appropriate WebKitGTK versions:
             
             ### Installation Instructions
             
-            **Debian/Ubuntu (.deb):**
+            **Fedora 40+ (.rpm with WebKitGTK 4.1):**
             ```bash
-            sudo dpkg -i serial-mate_${{ steps.version.outputs.version }}_amd64.deb
+            sudo dnf install serial-mate-${{ steps.version.outputs.version }}-1.fc40.amd64.rpm
+            ```
+            
+            **Ubuntu 24.04+ (.deb with WebKitGTK 4.1):**
+            ```bash
+            sudo dpkg -i serial-mate_${{ steps.version.outputs.version }}_ubuntu24.04_amd64.deb
             sudo apt-get install -f  # Install dependencies if needed
             ```
             
-            **RHEL/Fedora/CentOS (.rpm):**
+            **Ubuntu 22.04 (.deb with WebKitGTK 4.0, legacy):**
             ```bash
-            sudo rpm -i serial-mate-${{ steps.version.outputs.version }}-1.amd64.rpm
-            # Or using dnf/yum:
-            sudo dnf install serial-mate-${{ steps.version.outputs.version }}-1.amd64.rpm
+            sudo dpkg -i serial-mate_${{ steps.version.outputs.version }}_ubuntu22.04_amd64.deb
+            sudo apt-get install -f  # Install dependencies if needed
             ```
             
             **Manual Installation (.tar.gz):**
@@ -181,5 +399,10 @@ jobs:
             - Binary: `/usr/bin/serial-mate`
             - Desktop Entry: `/usr/share/applications/serial-mate.desktop`
             - Icon: `/usr/share/pixmaps/serial-mate.png`
+            
+            ### WebKitGTK Version Information
+            - **Fedora 40+ RPM**: Built with and requires WebKitGTK 4.1
+            - **Ubuntu 24.04 DEB**: Built with and requires WebKitGTK 4.1
+            - **Ubuntu 22.04 DEB**: Built with and requires WebKitGTK 4.0 (legacy)
             
             See [docs/packaging.md](docs/packaging.md) for more details.
