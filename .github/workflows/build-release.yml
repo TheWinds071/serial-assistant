@@ -27,11 +27,21 @@ jobs:
     steps:
       - name: Install Build Dependencies
         run: |
+          # 移除 golang，添加 curl 用于手动下载 Go
           dnf install -y \
-            git tar gzip xz lzma findutils which binutils \
-            golang nodejs npm \
+            git tar gzip xz lzma findutils which binutils curl \
+            nodejs npm \
             gcc gcc-c++ make pkgconfig \
             gtk3-devel webkit2gtk4.1-devel
+
+      - name: Setup Go 1.25
+        run: |
+          # 手动安装 Go 1.25 以确保版本满足 nfpm 要求
+          curl -L https://go.dev/dl/go1.25.0.linux-amd64.tar.gz -o go.tar.gz
+          rm -rf /usr/local/go && tar -C /usr/local -xzf go.tar.gz
+          # 设置 PATH
+          echo "/usr/local/go/bin" >> $GITHUB_PATH
+          echo "$( /usr/local/go/bin/go env GOPATH )/bin" >> $GITHUB_PATH
 
       - name: Checkout code
         uses: actions/checkout@v4
@@ -42,10 +52,7 @@ jobs:
         run: git config --global --add safe.directory $(pwd)
 
       - name: Install Wails
-        run: |
-          go install github.com/wailsapp/wails/v2/cmd/wails@latest
-          # 关键修复：动态获取 GOPATH 并添加到系统 PATH，供后续步骤使用
-          echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
 
       - name: Build Frontend
         run: |
@@ -59,7 +66,6 @@ jobs:
           GOOS: linux
           GOARCH: amd64
         run: |
-          # 修复：直接使用 wails 命令（依赖上面的 GITHUB_PATH 设置）
           wails build -platform linux/amd64 -clean -tags webkit2_41
           mkdir -p dist
           cp build/bin/serial-mate dist/serial-mate
@@ -87,8 +93,8 @@ jobs:
 
       - name: Install nfpm
         run: |
+          # Go 版本升级后，可以恢复使用 latest
           go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest
-          # nfpm 也会被安装到 GOPATH/bin，因为上面已经加了 PATH，这里不需要额外操作
 
       - name: Generate Fedora RPM
         env:
@@ -97,7 +103,6 @@ jobs:
         run: |
           mkdir -p dist/packages
           
-          # 修复：直接使用 nfpm 命令
           nfpm package \
             --config packaging/nfpm-fedora-rpm.yaml \
             --packager rpm \
@@ -124,7 +129,8 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.21'
+          # 升级到 Go 1.25
+          go-version: '1.25'
 
       - uses: actions/setup-node@v4
         with:
@@ -146,7 +152,6 @@ jobs:
 
       - name: Build Go Binary
         run: |
-          # 这里的 actions/setup-go 会自动处理 PATH，但我们加上 -tags webkit2_41
           wails build -platform linux/amd64 -clean -tags webkit2_41
           mkdir -p dist
           cp build/bin/serial-mate dist/serial-mate
@@ -162,14 +167,14 @@ jobs:
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
 
       - name: Install nfpm
-        run: go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest
+        run: |
+          go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest
 
       - name: Generate Ubuntu 24.04 DEB
         env:
           NFPM_VERSION: ${{ steps.version.outputs.version }}
           NFPM_ARCH: amd64
         run: |
-          # 显式添加 PATH 以防万一
           export PATH=$PATH:$(go env GOPATH)/bin
           mkdir -p dist/packages
           
@@ -199,7 +204,8 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.21'
+          # 升级到 Go 1.25
+          go-version: '1.25'
 
       - uses: actions/setup-node@v4
         with:
@@ -236,7 +242,8 @@ jobs:
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
 
       - name: Install nfpm
-        run: go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest
+        run: |
+          go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest
 
       - name: Generate Packages
         env:
@@ -252,7 +259,6 @@ jobs:
             --packager deb \
             --target dist/packages/serial-mate_${{ steps.version.outputs.version }}_ubuntu22.04_amd64.deb
           
-          # Tar.gz (Generic Linux)
           cd dist
           tar -czf packages/serial-mate-${{ steps.version.outputs.version }}-linux-amd64.tar.gz serial-mate
 
@@ -275,7 +281,8 @@ jobs:
           fetch-depth: '0'
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.21'
+          # 升级到 Go 1.25
+          go-version: '1.25'
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
@@ -306,7 +313,8 @@ jobs:
           fetch-depth: '0'
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.21'
+          # 升级到 Go 1.25
+          go-version: '1.25'
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
@@ -318,7 +326,6 @@ jobs:
           wails build -platform darwin/universal -clean
           mkdir dist
           cd build/bin
-          # 压缩 .app 文件夹
           zip -r ../../dist/serial-mate-macos-universal.app.zip serial-mate.app
           
       - uses: actions/upload-artifact@v4
@@ -346,18 +353,16 @@ jobs:
           VERSION="${GITHUB_REF#refs/tags/v}"
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
 
-      # 下载所有构建产物
       - uses: actions/download-artifact@v4
         with:
           path: release-assets
-          merge-multiple: true # 将所有 artifact 合并到同一个目录
+          merge-multiple: true
 
       - name: List Release Assets
         run: |
           echo "Assets to be released:"
           ls -lh release-assets/
 
-      # 生成 Changelog
       - name: Build Changelog
         id: build_changelog
         uses: mikepenz/release-changelog-builder-action@v5
@@ -375,14 +380,12 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # 创建 Release
       - name: Create Release and Upload Assets
         uses: softprops/action-gh-release@v1
         with:
           files: release-assets/*
           draft: false
           prerelease: false
-          # 拼接 Changelog 和 安装说明
           body: |
             ${{ steps.build_changelog.outputs.changelog }}
             
