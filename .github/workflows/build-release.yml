@@ -27,7 +27,6 @@ jobs:
     steps:
       - name: Install Build Dependencies
         run: |
-          # 修复点：添加 binutils 以支持 readelf 命令
           dnf install -y \
             git tar gzip xz lzma findutils which binutils \
             golang nodejs npm \
@@ -38,8 +37,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: '0'
-          # 安全目录设置，防止 git 报错
-          safe-directory: '*'
+          # 已删除错误的 safe-directory 参数
 
       - name: Fix Git Safe Directory
         run: git config --global --add safe.directory $(pwd)
@@ -60,14 +58,14 @@ jobs:
           GOARCH: amd64
         run: |
           export PATH=$PATH:/root/go/bin
-          wails build -platform linux/amd64 -clean
+          # 修复点：添加 -tags webkit2_41 以支持 WebKitGTK 4.1
+          wails build -platform linux/amd64 -clean -tags webkit2_41
           mkdir -p dist
           cp build/bin/serial-mate dist/serial-mate
 
       - name: Validate WebKitGTK Linking
         run: |
           echo "Checking WebKitGTK linking..."
-          # 现在 readelf 应该可以正常工作了
           readelf -d dist/serial-mate | grep -E 'NEEDED.*webkit' || true
           if readelf -d dist/serial-mate | grep -E 'NEEDED.*libwebkit2gtk-4\.1'; then
             echo "✓ Binary correctly links to WebKitGTK 4.1"
@@ -136,7 +134,7 @@ jobs:
       - name: Install Linux Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev build-essential pkg-config
 
       - name: Build Frontend
         run: |
@@ -146,7 +144,8 @@ jobs:
 
       - name: Build Go Binary
         run: |
-          wails build -platform linux/amd64 -clean
+          # 修复点：添加 -tags webkit2_41 以支持 WebKitGTK 4.1
+          wails build -platform linux/amd64 -clean -tags webkit2_41
           mkdir -p dist
           cp build/bin/serial-mate dist/serial-mate
 
@@ -168,6 +167,7 @@ jobs:
           NFPM_VERSION: ${{ steps.version.outputs.version }}
           NFPM_ARCH: amd64
         run: |
+          # 确保能找到 GOPATH/bin 下的 nfpm
           export PATH=$PATH:$(go env GOPATH)/bin
           mkdir -p dist/packages
           
@@ -219,6 +219,7 @@ jobs:
 
       - name: Build Go Binary
         run: |
+          # Ubuntu 22.04 默认使用 WebKit 4.0，不需要额外 tag
           wails build -platform linux/amd64 -clean
           mkdir -p dist
           cp build/bin/serial-mate dist/serial-mate
