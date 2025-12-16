@@ -49,6 +49,49 @@
 * **实时下载进度**: 显示下载进度条和速度，让更新过程一目了然。
 * **跨平台支持**: 支持 Windows、macOS 和 Linux 平台的自动更新。
 
+## 📦 安装 (Installation)
+
+### Windows & macOS
+
+从 [GitHub Releases](https://github.com/TheWinds071/serial-mate/releases) 页面下载对应平台的安装包：
+- **Windows**: 下载 `serial-mate-windows-amd64.exe`
+- **macOS**: 下载 `serial-mate-macos-universal.app.zip`
+
+### Linux
+
+我们提供多种格式的 Linux 发行版安装包：
+
+#### Debian/Ubuntu (.deb)
+
+```bash
+# 下载并安装 .deb 包
+sudo dpkg -i serial-mate_<version>_amd64.deb
+
+# 如有依赖问题，运行：
+sudo apt-get install -f
+```
+
+#### RHEL/Fedora/CentOS (.rpm)
+
+```bash
+# 使用 dnf 安装
+sudo dnf install serial-mate-<version>-1.amd64.rpm
+
+# 或使用 rpm 命令
+sudo rpm -i serial-mate-<version>-1.amd64.rpm
+```
+
+#### 通用二进制 (.tar.gz)
+
+```bash
+# 解压并安装
+tar -xzf serial-mate-<version>-linux-amd64.tar.gz
+sudo mv serial-mate /usr/local/bin/
+sudo chmod +x /usr/local/bin/serial-mate
+```
+
+更多安装方式和详细说明，请参阅 [docs/packaging.md](docs/packaging.md)。
+
 ## 🛠 技术栈 (Tech Stack)
 
 * **后端 (Backend)**: Go (Golang)

@@ -1,0 +1,79 @@
+# nfpm configuration for serial-mate
+# This configuration is used to generate .deb, .rpm, and tar.gz packages
+
+name: "serial-mate"
+arch: "${NFPM_ARCH}"
+platform: "linux"
+version: "${NFPM_VERSION}"
+section: "utils"
+priority: "optional"
+maintainer: "TheWinds071 <https://github.com/TheWinds071>"
+description: |
+  Serial Mate - Modern Serial Port Debugging Tool
+  A cross-platform serial port debugging tool built with Go (Wails) and Vue 3.
+  Features modern flat design with Morandi color scheme, providing an elegant
+  and efficient debugging experience for embedded developers.
+vendor: "TheWinds071"
+homepage: "https://github.com/TheWinds071/serial-mate"
+license: "GPL-3.0"
+
+# Dependencies for the application to run
+# These are runtime dependencies needed for the GUI to work
+depends:
+  - libgtk-3-0
+  - libwebkit2gtk-4.0-37
+
+# Files to be included in the package
+contents:
+  - src: "${NFPM_BINARY_PATH}"
+    dst: "/usr/bin/serial-mate"
+    file_info:
+      mode: 0755
+
+  # Create application desktop entry
+  - src: ./packaging/serial-mate.desktop
+    dst: /usr/share/applications/serial-mate.desktop
+    file_info:
+      mode: 0644
+
+  # Install application icon
+  - src: ./build/appicon.png
+    dst: /usr/share/pixmaps/serial-mate.png
+    file_info:
+      mode: 0644
+
+# Package formats to generate
+# Will be overridden by command line but listed here for reference
+formats:
+  - deb
+  - rpm
+  - tar.gz
+
+# RPM specific configuration
+rpm:
+  group: "Applications/Engineering"
+  compression: lzma
+  signature:
+    key_file: ""
+
+# Deb specific configuration
+deb:
+  compression: xz
+  signature:
+    key_file: ""
+
+# Scripts (optional, can be used for post-install operations)
+# scripts:
+#   postinstall: ./packaging/postinstall.sh
+#   preremove: ./packaging/preremove.sh
+
+# Overrides for different architectures
+overrides:
+  deb:
+    depends:
+      - libgtk-3-0
+      - libwebkit2gtk-4.0-37
+  rpm:
+    depends:
+      - gtk3
+      - webkit2gtk4.0

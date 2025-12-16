@@ -4,3 +4,12 @@ frontend/dist
 .idea
 *.test
 *.test.exe
+
+# Package build artifacts
+dist/
+*.deb
+*.rpm
+*.tar.gz
+packaging/*.deb
+packaging/*.rpm
+packaging/*.tar.gz

@@ -1,0 +1,187 @@
+name: Release Packages (deb/rpm/tar.gz)
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to build (e.g., 1.3.5)'
+        required: false
+        default: '0.0.0-dev'
+
+permissions:
+  contents: write
+
+jobs:
+  build-linux-packages:
+    name: Build Linux Packages (${{ matrix.arch }})
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            go_arch: amd64
+            nfpm_arch: amd64
+          - arch: arm64
+            go_arch: arm64
+            nfpm_arch: arm64
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: '0'
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+          check-latest: true
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Wails
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
+
+      - name: Install Linux Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.0-dev
+          # For cross-compilation to arm64
+          if [ "${{ matrix.arch }}" = "arm64" ]; then
+            sudo dpkg --add-architecture arm64
+            sudo apt-get update
+            sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+          fi
+
+      - name: Build Frontend
+        run: |
+          cd frontend
+          npm install
+          npm run build
+
+      - name: Build Go Binary
+        env:
+          CGO_ENABLED: 1
+          GOOS: linux
+          GOARCH: ${{ matrix.go_arch }}
+        run: |
+          if [ "${{ matrix.arch }}" = "arm64" ]; then
+            export CC=aarch64-linux-gnu-gcc
+            export CXX=aarch64-linux-gnu-g++
+          fi
+          
+          # Build using wails for amd64 (native compilation)
+          if [ "${{ matrix.arch }}" = "amd64" ]; then
+            wails build -platform linux/amd64 -clean
+            mkdir -p dist
+            cp build/bin/serial-mate dist/serial-mate
+          else
+            # For arm64, we'll do a simple go build since cross-compiling Wails is complex
+            # and requires arm64 GTK/WebKit libraries
+            echo "Skipping arm64 build - requires native arm64 build environment"
+            mkdir -p dist
+            # Create a placeholder to not break the workflow
+            touch dist/serial-mate-${{ matrix.arch }}.placeholder
+          fi
+
+      - name: Determine Version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+          else
+            # Extract version from tag (remove 'v' prefix)
+            VERSION="${GITHUB_REF#refs/tags/v}"
+          fi
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "Building version: ${VERSION}"
+
+      - name: Install nfpm
+        run: |
+          curl -sfL https://goreleaser.com/static/run | bash -s -- install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest
+
+      - name: Generate Packages with nfpm
+        if: matrix.arch == 'amd64'
+        env:
+          NFPM_VERSION: ${{ steps.version.outputs.version }}
+          NFPM_ARCH: ${{ matrix.nfpm_arch }}
+          NFPM_BINARY_PATH: ./dist/serial-mate
+        run: |
+          mkdir -p dist/packages
+          
+          # Generate .deb package
+          nfpm package \
+            --config packaging/nfpm.yaml \
+            --packager deb \
+            --target dist/packages/serial-mate_${{ steps.version.outputs.version }}_${{ matrix.arch }}.deb
+          
+          # Generate .rpm package
+          nfpm package \
+            --config packaging/nfpm.yaml \
+            --packager rpm \
+            --target dist/packages/serial-mate-${{ steps.version.outputs.version }}-1.${{ matrix.arch }}.rpm
+          
+          # Generate .tar.gz archive (contains binary only)
+          cd dist
+          tar -czf packages/serial-mate-${{ steps.version.outputs.version }}-linux-${{ matrix.arch }}.tar.gz serial-mate
+          cd ..
+          
+          # List generated packages
+          echo "Generated packages:"
+          ls -lh dist/packages/
+
+      - name: Upload Artifacts
+        if: matrix.arch == 'amd64'
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-packages-${{ matrix.arch }}
+          path: dist/packages/*
+          retention-days: 30
+
+      - name: Create Release and Upload Assets
+        if: startsWith(github.ref, 'refs/tags/') && matrix.arch == 'amd64'
+        uses: softprops/action-gh-release@v1
+        with:
+          files: dist/packages/*
+          draft: false
+          prerelease: false
+          body: |
+            ## Linux Packages
+            
+            This release includes multiple package formats for easy installation:
+            
+            ### Installation Instructions
+            
+            **Debian/Ubuntu (.deb):**
+            ```bash
+            sudo dpkg -i serial-mate_${{ steps.version.outputs.version }}_amd64.deb
+            sudo apt-get install -f  # Install dependencies if needed
+            ```
+            
+            **RHEL/Fedora/CentOS (.rpm):**
+            ```bash
+            sudo rpm -i serial-mate-${{ steps.version.outputs.version }}-1.amd64.rpm
+            # Or using dnf/yum:
+            sudo dnf install serial-mate-${{ steps.version.outputs.version }}-1.amd64.rpm
+            ```
+            
+            **Manual Installation (.tar.gz):**
+            ```bash
+            tar -xzf serial-mate-${{ steps.version.outputs.version }}-linux-amd64.tar.gz
+            sudo mv serial-mate /usr/local/bin/
+            sudo chmod +x /usr/local/bin/serial-mate
+            ```
+            
+            ### Package Contents
+            - Binary: `/usr/bin/serial-mate`
+            - Desktop Entry: `/usr/share/applications/serial-mate.desktop`
+            - Icon: `/usr/share/pixmaps/serial-mate.png`
+            
+            See [docs/packaging.md](docs/packaging.md) for more details.
