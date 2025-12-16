@@ -25,7 +25,7 @@ depends:
 
 # Files to be included in the package
 contents:
-  - src: "${NFPM_BINARY_PATH}"
+  - src: ./dist/serial-mate
     dst: "/usr/bin/serial-mate"
     file_info:
       mode: 0755
@@ -41,13 +41,6 @@ contents:
     dst: /usr/share/pixmaps/serial-mate.png
     file_info:
       mode: 0644
-
-# Package formats to generate
-# Will be overridden by command line but listed here for reference
-formats:
-  - deb
-  - rpm
-  - tar.gz
 
 # RPM specific configuration
 rpm:

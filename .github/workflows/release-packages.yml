@@ -104,15 +104,16 @@ jobs:
           echo "Building version: ${VERSION}"
 
       - name: Install nfpm
+        if: matrix.arch == 'amd64'
         run: |
-          curl -sfL https://goreleaser.com/static/run | bash -s -- install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest
+          go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest
+          echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
 
       - name: Generate Packages with nfpm
         if: matrix.arch == 'amd64'
         env:
           NFPM_VERSION: ${{ steps.version.outputs.version }}
           NFPM_ARCH: ${{ matrix.nfpm_arch }}
-          NFPM_BINARY_PATH: ./dist/serial-mate
         run: |
           mkdir -p dist/packages
           
