@@ -180,7 +180,7 @@ Serial Mate requires the following runtime dependencies:
 
 **RHEL/Fedora/CentOS:**
 - `gtk3` - GTK+ 3 library
-- `webkit2gtk4.0` - WebKit2GTK library
+- `webkit2gtk4.1` - WebKit2GTK library
 
 These dependencies are automatically installed when using `.deb` or `.rpm` packages.
 
@@ -194,7 +194,7 @@ For building from source, you need:
 
 **RHEL/Fedora/CentOS:**
 - `gtk3-devel`
-- `webkit2gtk4.0-devel`
+- `webkit2gtk4.1-devel`
 
 ## Troubleshooting
 
@@ -217,7 +217,7 @@ sudo apt-get install -f
 
 **RHEL/Fedora/CentOS:**
 ```bash
-sudo dnf install gtk3 webkit2gtk4.0
+sudo dnf install gtk3 webkit2gtk4.1
 ```
 
 ### Desktop Entry Not Showing
