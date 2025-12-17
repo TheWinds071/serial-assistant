@@ -1,0 +1,51 @@
+# nfpm configuration for serial-mate Fedora RPM (WebKitGTK 4.1)
+# This configuration is used to generate RPM packages for Fedora 40+ with WebKitGTK 4.1
+
+name: "serial-mate"
+arch: "${NFPM_ARCH}"
+platform: "linux"
+version: "${NFPM_VERSION}"
+section: "utils"
+priority: "optional"
+maintainer: "TheWinds071 <https://github.com/TheWinds071>"
+description: |
+  Serial Mate - Modern Serial Port Debugging Tool
+  A cross-platform serial port debugging tool built with Go (Wails) and Vue 3.
+  Features modern flat design with Morandi color scheme, providing an elegant
+  and efficient debugging experience for embedded developers.
+  
+  Built for Fedora 40+ with WebKitGTK 4.1 support.
+vendor: "TheWinds071"
+homepage: "https://github.com/TheWinds071/serial-mate"
+license: "GPL-3.0"
+
+# Dependencies for the application to run on Fedora 40+
+depends:
+  - gtk3
+  - webkit2gtk4.1
+
+# Files to be included in the package
+contents:
+  - src: ./dist/serial-mate
+    dst: "/usr/bin/serial-mate"
+    file_info:
+      mode: 0755
+
+  # Create application desktop entry
+  - src: ./packaging/serial-mate.desktop
+    dst: /usr/share/applications/serial-mate.desktop
+    file_info:
+      mode: 0644
+
+  # Install application icon
+  - src: ./build/appicon.png
+    dst: /usr/share/pixmaps/serial-mate.png
+    file_info:
+      mode: 0644
+
+# RPM specific configuration
+rpm:
+  group: "Applications/Engineering"
+  compression: lzma
+  signature:
+    key_file: ""
