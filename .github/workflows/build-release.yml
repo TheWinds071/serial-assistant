@@ -1,0 +1,422 @@
+name: Build and Release (All Platforms)
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to build (e.g., 1.3.5)'
+        required: false
+        default: '0.0.0-dev'
+
+permissions:
+  contents: write
+
+jobs:
+  # -------------------------------------------------------------------------
+  # Job 1: Fedora 40+ RPM build (with WebKitGTK 4.1)
+  # -------------------------------------------------------------------------
+  build-fedora-rpm:
+    name: Build Fedora RPM (WebKitGTK 4.1)
+    runs-on: ubuntu-latest
+    container:
+      image: fedora:41
+    
+    steps:
+      - name: Install Build Dependencies
+        run: |
+          # 移除 golang，添加 curl 用于手动下载 Go
+          dnf install -y \
+            git tar gzip xz lzma findutils which binutils curl \
+            nodejs npm \
+            gcc gcc-c++ make pkgconfig \
+            gtk3-devel webkit2gtk4.1-devel
+
+      - name: Setup Go 1.25
+        run: |
+          # 手动安装 Go 1.25 以确保版本满足 nfpm 要求
+          curl -L https://go.dev/dl/go1.25.0.linux-amd64.tar.gz -o go.tar.gz
+          rm -rf /usr/local/go && tar -C /usr/local -xzf go.tar.gz
+          # 设置 PATH
+          echo "/usr/local/go/bin" >> $GITHUB_PATH
+          echo "$( /usr/local/go/bin/go env GOPATH )/bin" >> $GITHUB_PATH
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: '0'
+
+      - name: Fix Git Safe Directory
+        run: git config --global --add safe.directory $(pwd)
+
+      - name: Install Wails
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
+
+      - name: Build Frontend
+        run: |
+          cd frontend
+          npm install
+          npm run build
+
+      - name: Build Go Binary
+        env:
+          CGO_ENABLED: 1
+          GOOS: linux
+          GOARCH: amd64
+        run: |
+          wails build -platform linux/amd64 -clean -tags webkit2_41
+          mkdir -p dist
+          cp build/bin/serial-mate dist/serial-mate
+
+      - name: Validate WebKitGTK Linking
+        run: |
+          echo "Checking WebKitGTK linking..."
+          readelf -d dist/serial-mate | grep -E 'NEEDED.*webkit' || true
+          if readelf -d dist/serial-mate | grep -E 'NEEDED.*libwebkit2gtk-4\.1'; then
+            echo "✓ Binary correctly links to WebKitGTK 4.1"
+          else
+            echo "✗ Binary does not link to WebKitGTK 4.1"
+            exit 1
+          fi
+
+      - name: Determine Version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+          else
+            VERSION="${GITHUB_REF#refs/tags/v}"
+          fi
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+
+      - name: Install nfpm
+        run: |
+          # Go 版本升级后，可以恢复使用 latest
+          go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest
+
+      - name: Generate Fedora RPM
+        env:
+          NFPM_VERSION: ${{ steps.version.outputs.version }}
+          NFPM_ARCH: amd64
+        run: |
+          mkdir -p dist/packages
+          
+          nfpm package \
+            --config packaging/nfpm-fedora-rpm.yaml \
+            --packager rpm \
+            --target dist/packages/serial-mate-${{ steps.version.outputs.version }}-1.fc40.amd64.rpm
+
+      - name: Upload Fedora RPM Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: fedora-rpm-amd64
+          path: dist/packages/*.rpm
+          retention-days: 1
+
+  # -------------------------------------------------------------------------
+  # Job 2: Ubuntu 24.04 DEB build (with WebKitGTK 4.1)
+  # -------------------------------------------------------------------------
+  build-ubuntu24-deb:
+    name: Build Ubuntu 24.04 DEB (WebKitGTK 4.1)
+    runs-on: ubuntu-24.04
+    
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: '0'
+
+      - uses: actions/setup-go@v5
+        with:
+          # 升级到 Go 1.25
+          go-version: '1.25'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Wails
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
+
+      - name: Install Linux Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev build-essential pkg-config
+
+      - name: Build Frontend
+        run: |
+          cd frontend
+          npm install
+          npm run build
+
+      - name: Build Go Binary
+        run: |
+          wails build -platform linux/amd64 -clean -tags webkit2_41
+          mkdir -p dist
+          cp build/bin/serial-mate dist/serial-mate
+
+      - name: Determine Version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+          else
+            VERSION="${GITHUB_REF#refs/tags/v}"
+          fi
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+
+      - name: Install nfpm
+        run: |
+          go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest
+
+      - name: Generate Ubuntu 24.04 DEB
+        env:
+          NFPM_VERSION: ${{ steps.version.outputs.version }}
+          NFPM_ARCH: amd64
+        run: |
+          export PATH=$PATH:$(go env GOPATH)/bin
+          mkdir -p dist/packages
+          
+          nfpm package \
+            --config packaging/nfpm-ubuntu24-deb.yaml \
+            --packager deb \
+            --target dist/packages/serial-mate_${{ steps.version.outputs.version }}_ubuntu24.04_amd64.deb
+
+      - name: Upload Ubuntu 24.04 DEB Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ubuntu24-deb-amd64
+          path: dist/packages/*.deb
+          retention-days: 1
+
+  # -------------------------------------------------------------------------
+  # Job 3: Ubuntu 22.04 packages (Legacy, WebKitGTK 4.0)
+  # -------------------------------------------------------------------------
+  build-ubuntu22-packages:
+    name: Build Ubuntu 22.04 Packages (Legacy)
+    runs-on: ubuntu-22.04
+    
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: '0'
+
+      - uses: actions/setup-go@v5
+        with:
+          # 升级到 Go 1.25
+          go-version: '1.25'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Wails
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
+
+      - name: Install Linux Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.0-dev
+
+      - name: Build Frontend
+        run: |
+          cd frontend
+          npm install
+          npm run build
+
+      - name: Build Go Binary
+        run: |
+          wails build -platform linux/amd64 -clean
+          mkdir -p dist
+          cp build/bin/serial-mate dist/serial-mate
+
+      - name: Determine Version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+          else
+            VERSION="${GITHUB_REF#refs/tags/v}"
+          fi
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+
+      - name: Install nfpm
+        run: |
+          go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest
+
+      - name: Generate Packages
+        env:
+          NFPM_VERSION: ${{ steps.version.outputs.version }}
+          NFPM_ARCH: amd64
+        run: |
+          export PATH=$PATH:$(go env GOPATH)/bin
+          mkdir -p dist/packages
+          
+          # DEB for Ubuntu 22.04
+          nfpm package \
+            --config packaging/nfpm.yaml \
+            --packager deb \
+            --target dist/packages/serial-mate_${{ steps.version.outputs.version }}_ubuntu22.04_amd64.deb
+          
+          cd dist
+          tar -czf packages/serial-mate-${{ steps.version.outputs.version }}-linux-amd64.tar.gz serial-mate
+
+      - name: Upload Ubuntu 22.04 Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ubuntu22-packages-amd64
+          path: dist/packages/*
+          retention-days: 1
+
+  # -------------------------------------------------------------------------
+  # Job 4: Windows Build
+  # -------------------------------------------------------------------------
+  build-windows:
+    name: Build Windows
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: '0'
+      - uses: actions/setup-go@v5
+        with:
+          # 升级到 Go 1.25
+          go-version: '1.25'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install Wails
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
+      
+      - name: Build
+        run: |
+          wails build -platform windows/amd64 -clean
+          mkdir dist
+          mv build/bin/serial-mate.exe dist/serial-mate-windows-amd64.exe
+          
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-exe
+          path: dist/*.exe
+          retention-days: 1
+
+  # -------------------------------------------------------------------------
+  # Job 5: macOS Build
+  # -------------------------------------------------------------------------
+  build-macos:
+    name: Build macOS
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: '0'
+      - uses: actions/setup-go@v5
+        with:
+          # 升级到 Go 1.25
+          go-version: '1.25'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install Wails
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
+      
+      - name: Build
+        run: |
+          wails build -platform darwin/universal -clean
+          mkdir dist
+          cd build/bin
+          zip -r ../../dist/serial-mate-macos-universal.app.zip serial-mate.app
+          
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-app
+          path: dist/*.zip
+          retention-days: 1
+
+  # -------------------------------------------------------------------------
+  # Job 6: Final Release (Collect all artifacts)
+  # -------------------------------------------------------------------------
+  release:
+    name: Create GitHub Release
+    needs: [build-fedora-rpm, build-ubuntu24-deb, build-ubuntu22-packages, build-windows, build-macos]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Determine Version
+        id: version
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: List Release Assets
+        run: |
+          echo "Assets to be released:"
+          ls -lh release-assets/
+
+      - name: Build Changelog
+        id: build_changelog
+        uses: mikepenz/release-changelog-builder-action@v5
+        with:
+          configuration: |
+            {
+                "template": "#{{CHANGELOG}}",
+                "categories": [
+                  { "title": "## 🚀 新功能 (Features)", "labels": ["feature", "feat", "enhancement"] },
+                  { "title": "## 🐛 Bug 修复 (Fixes)", "labels": ["fix", "bug"] },
+                  { "title": "## 🛠 优化与维护 (Maintenance)", "labels": ["chore", "refactor", "docs"] }
+                ],
+                "ignore_unknown": false
+            }
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create Release and Upload Assets
+        uses: softprops/action-gh-release@v1
+        with:
+          files: release-assets/*
+          draft: false
+          prerelease: false
+          body: |
+            ${{ steps.build_changelog.outputs.changelog }}
+            
+            ---
+            
+            ## Installation / 安装说明
+            
+            **Windows:**
+            Download `serial-mate-windows-amd64.exe` and run it directly.
+            
+            **macOS:**
+            Download `serial-mate-macos-universal.app.zip`, unzip, and move `.app` to Applications.
+            
+            **Fedora 40+ (.rpm with WebKitGTK 4.1):**
+            ```bash
+            sudo dnf install serial-mate-${{ steps.version.outputs.version }}-1.fc40.amd64.rpm
+            ```
+            
+            **Ubuntu 24.04+ (.deb with WebKitGTK 4.1):**
+            ```bash
+            sudo dpkg -i serial-mate_${{ steps.version.outputs.version }}_ubuntu24.04_amd64.deb
+            sudo apt-get install -f
+            ```
+            
+            **Ubuntu 22.04 (.deb with WebKitGTK 4.0):**
+            ```bash
+            sudo dpkg -i serial-mate_${{ steps.version.outputs.version }}_ubuntu22.04_amd64.deb
+            sudo apt-get install -f
+            ```
+            
+            **Generic Linux (.tar.gz):**
+            ```bash
+            tar -xzf serial-mate-${{ steps.version.outputs.version }}-linux-amd64.tar.gz
+            ```
