@@ -1,5 +1,32 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, nextTick, watch, computed, reactive } from 'vue';
+import { ref, onMounted, onUnmounted, nextTick, watch, computed, reactive, provide } from 'vue';
+import VChart, { THEME_KEY } from 'vue-echarts';
+import { use } from 'echarts/core';
+import { CanvasRenderer } from 'echarts/renderers';
+import { LineChart } from 'echarts/charts';
+import {
+  GridComponent,
+  TooltipComponent,
+  TitleComponent,
+  ToolboxComponent,
+  DataZoomComponent,
+  LegendComponent
+} from 'echarts/components';
+
+use([
+  CanvasRenderer,
+  LineChart,
+  GridComponent,
+  TooltipComponent,
+  TitleComponent,
+  ToolboxComponent,
+  DataZoomComponent,
+  LegendComponent
+]);
+
+// Provide theme for VChart
+provide(THEME_KEY, 'dark'); // Or dynamics based on app theme
+
 // 引入后端方法 (新增 OpenJLink, GetVersion, CheckForUpdates, DownloadAndInstallUpdate, QuitApp)
 import { GetSerialPorts, OpenSerial, OpenTcpClient, OpenTcpServer, OpenUdp, OpenJLink, Close as CloseConnection, SendData, GetVersion, CheckForUpdates, DownloadAndInstallUpdate, QuitApp } from '../wailsjs/go/main/App';
 import { EventsOn } from '../wailsjs/runtime/runtime';
@@ -108,6 +135,165 @@ const autoScroll = ref(true);
 const logWindowRef = ref<HTMLElement | null>(null);
 const rxCount = ref(0);
 const txCount = ref(0);
+
+// --- Charting State ---
+const showChart = ref(false);
+// We'll store series data here. Map<seriesIndex, [timestamp, value][]>
+const chartData = reactive<{ [key: number]: number[][] }>({});
+
+// Use sample counter for X axis to prevent timestamp clumping
+const sampleCount = ref(0);
+
+
+const chartOption = computed(() => {
+  const seriesIndices = Object.keys(chartData);
+  const seriesList = seriesIndices.map(idx => ({
+    name: `Ch ${idx}`,
+    type: 'line',
+    showSymbol: false,
+    sampling: 'lttb', // Optimize for high density
+    data: chartData[parseInt(idx)]
+  }));
+
+
+  return {
+    backgroundColor: 'transparent',
+    tooltip: {
+      trigger: 'axis'
+    },
+    legend: {
+        show: true,
+        textStyle: { color: theme.textMain }
+    },
+    grid: {
+      top: 30, left: 50, right: 20, bottom: 30
+    },
+    xAxis: {
+      type: 'value', // Changed from 'time' to 'value' for sample-based plotting
+      splitLine: { show: false },
+       axisLabel: { color: theme.textSub }
+    },
+
+    yAxis: {
+      type: 'value',
+      splitLine: { show: true, lineStyle: { color: theme.bgSide } },
+       axisLabel: { color: theme.textSub }
+    },
+    dataZoom: [
+        { type: 'inside' },
+        { type: 'slider', height: 20, bottom: 0 }
+    ],
+    series: seriesList.length > 0 ? seriesList : [{ type: 'line', data: [] }]
+  };
+});
+
+// Binary parser buffer
+let parserBuffer: number[] = [];
+const HEX_PACKET_SUFFIX = [0x00, 0x00, 0x80, 0x7f];
+
+// Function to parse incoming data for plotting
+const parseAndPlot = (newBytes: number[]) => {
+    if (!showChart.value) return;
+
+    // 1. String Protocol: &DRAW,{float}...#\n
+    // We'll use a crude string check on the new bytes for now. 
+    // Ideally we should buffer strings too, but for simplicity assuming atomic packets or simple stream.
+    // Let's convert to string to check for &DRAW
+    const strChunk = new TextDecoder().decode(new Uint8Array(newBytes));
+    // Use regex to find all matches in this chunk (and potentially across chunks, but let's stick to chunk for now or append to a small string buffer if needed)
+    // To handle split packets, we might need a string buffer.
+    // For safety, let's just match within the chunk or a sliding window?
+    // User requirement: "&DRAW,{float1},{float2}#\n"
+    
+    // Simple String Parser
+    const drawMatches = strChunk.matchAll(/&DRAW,([\d.,-]+)#/g);
+    for (const match of drawMatches) {
+        // match[1] is "float1,float2"
+        const parts = match[1].split(',');
+        const xVal = sampleCount.value++; // Increment sample counter
+        
+        parts.forEach((valStr, idx) => {
+            const val = parseFloat(valStr);
+            if (!isNaN(val)) {
+                 if (!chartData[idx]) chartData[idx] = [];
+                 chartData[idx].push([xVal, val]);
+                 // Limit bounds
+                 if (chartData[idx].length > 1000) chartData[idx].shift();
+            }
+        });
+    }
+
+    // 2. Hex Protocol: ... 0x00 0x00 0x80 0x7f
+
+    // Append to buffer
+    parserBuffer.push(...newBytes);
+    
+    // Look for suffix
+    // We need to find the sequence 00 00 80 7f
+    let searchIdx = 0;
+    while (searchIdx <= parserBuffer.length - 4) {
+        // Check for suffix
+        if (parserBuffer[searchIdx] === 0x00 &&
+            parserBuffer[searchIdx+1] === 0x00 &&
+            parserBuffer[searchIdx+2] === 0x80 &&
+            parserBuffer[searchIdx+3] === 0x7f) {
+            
+            // Found packet end.
+            // The packet content is everything before this suffix (up to previous suffix or start)
+            // But we process continuously.
+            // How many floats? "Arbitrary count" logic isn't specified for Hex, but earlier user said "{float} can be arbitrary count" for string.
+            // For Hex, usually it's fixed or described. 
+            // Let's assume the payload BEFORE the suffix contains 32-bit floats.
+            
+            // Where did this packet start? 
+            // We just take as many floats as possible from the bytes before this suffix.
+            // Let's try to interpret the preceding bytes as floats.
+            
+            const endIndex = searchIdx;
+            // Let's suppose the packet is just the floats + suffix.
+            // We need to decide where the packet started. 
+            // If we greedily consume, we might consume garbage.
+            // But without a header, we can only assume the stream *is* floats.
+            
+            // Strategy: Backtrack from endIndex in 4-byte chunks.
+            const payloadBytes = parserBuffer.slice(0, endIndex);
+            const floatCount = Math.floor(payloadBytes.length / 4);
+
+            
+            const view = new DataView(new Uint8Array(payloadBytes).buffer);
+            
+            // We read from the end or start? 
+            // Let's read all available valid floats.
+            
+            // Advance key counter for this packet
+            const xVal = sampleCount.value++;
+
+            for (let i = 0; i < floatCount; i++) {
+                // Little Endian floats
+                // offset = payloadBytes.length - (floatCount * 4) + (i * 4);
+                
+                // Let's simpler: payload is payloadBytes.
+                const start = payloadBytes.length % 4; // Buffer alignment
+                const val = view.getFloat32(start + i * 4, true); // Little Endian
+                
+                if (!chartData[i]) chartData[i] = [];
+                chartData[i].push([xVal, val]);
+                 if (chartData[i].length > 1000) chartData[i].shift();
+            }
+            
+            // Remove processed part (up to searchIdx + 4)
+            parserBuffer.splice(0, searchIdx + 4);
+            searchIdx = 0; // Reset search
+        } else {
+            searchIdx++;
+        }
+    }
+    
+     // Cap buffer size
+     if (parserBuffer.length > 4096) {
+         parserBuffer.shift(); // Drop old byte
+     }
+}
 
 // --- 3. UI 状态 (主题 & 弹窗) ---
 const showThemePanel = ref(false);
@@ -227,6 +413,92 @@ const downloadAndInstall = async () => {
   }
 };
 
+
+
+// --- 5. 性能优化：批量处理 ---
+const incomingDataQueue: number[][] = [];
+let animationFrameId: number | null = null;
+let lastProcessTime = 0;
+const PROCESS_INTERVAL = 30; // ms (approx 30fps)
+
+const startProcessingLoop = () => {
+    if (animationFrameId !== null) return;
+    
+    const loop = (timestamp: number) => {
+        animationFrameId = requestAnimationFrame(loop);
+        
+        // 限流，避免过于频繁
+        if (timestamp - lastProcessTime < PROCESS_INTERVAL) return;
+        lastProcessTime = timestamp;
+        
+        if (incomingDataQueue.length === 0) return;
+        
+        // 取出所有待处理数据
+        const batchChunks = incomingDataQueue.splice(0, incomingDataQueue.length);
+        
+        // 计算总长度
+        let totalLen = 0;
+        for (const chunk of batchChunks) totalLen += chunk.length;
+        if (totalLen === 0) return;
+        
+        // 合并为一个大数组
+        const consolidatedBytes = new Array(totalLen);
+        let offset = 0;
+        for (const chunk of batchChunks) {
+            for (let i = 0; i < chunk.length; i++) {
+                consolidatedBytes[offset++] = chunk[i];
+            }
+        }
+        
+        try {
+            // 1. 绘图解析
+            parseAndPlot(consolidatedBytes);
+            
+            // 2. 更新 rawDataBuffer
+            rawDataBuffer.value.push(...consolidatedBytes);
+            if (rawDataBuffer.value.length > MAX_BUFFER_SIZE) {
+                 const overflow = rawDataBuffer.value.length - MAX_BUFFER_SIZE;
+                 rawDataBuffer.value.splice(0, overflow);
+            }
+            
+            // 3. 更新 receivedData (显示文本)
+            let decodedText = "";
+            
+            if (showHex.value) {
+                 decodedText = formatData(consolidatedBytes, true);
+            } else {
+                 decodedText = formatData(consolidatedBytes, false);
+            }
+
+            if (showTimestamp.value) {
+                decodedText = getTimeStamp() + decodedText;
+            }
+            
+            receivedData.value += decodedText;
+            
+            // 截断
+            if (receivedData.value.length > MAX_BUFFER_SIZE) {
+                receivedData.value = receivedData.value.slice(receivedData.value.length - MAX_BUFFER_SIZE);
+            }
+            
+            // 4. 更新计数和滚动
+            rxCount.value += totalLen;
+            scrollToBottom();
+        } catch (e) {
+            console.error("Error in processing loop:", e);
+        }
+    };
+    
+    animationFrameId = requestAnimationFrame(loop);
+};
+
+const stopProcessingLoop = () => {
+    if (animationFrameId !== null) {
+        cancelAnimationFrame(animationFrameId);
+        animationFrameId = null;
+    }
+};
+
 // --- 4. 生命周期 ---
 onMounted(async () => {
   // 获取当前版本
@@ -247,42 +519,14 @@ onMounted(async () => {
       bytes = data;
     }
 
-    if (bytes && bytes.length > 0) {
       // --- 修复开始：限制内存增长 ---
-
-      // 1. 更新 rawDataBuffer (使用非响应式操作优化性能)
-      // 如果不想丢失历史 Hex 切换能力，需要限制大小；如果不需要回看太久，建议直接截断
-      rawDataBuffer.value.push(...bytes);
-      if (rawDataBuffer.value.length > MAX_BUFFER_SIZE) {
-        // 删除头部多余的数据，保持数组大小在限制范围内
-        const overflow = rawDataBuffer.value.length - MAX_BUFFER_SIZE;
-        rawDataBuffer.value.splice(0, overflow);
-      }
-
-      // 2. 更新 receivedData (显示文本)
-      const newData = formatData(bytes, showHex.value);
-
-      // [修改] 如果开启了时间戳，在将新数据追加到显示区域前，先拼接时间戳
-      // 注意：这里的时间戳仅追加在显示层，不会存入 rawDataBuffer (这意味着切换 Hex/Text 视图时时间戳会因重绘而消失，这是符合预期的轻量级实现)
-      if (showTimestamp.value) {
-        // 如果需要换行逻辑，可以在这里判断 receivedData 末尾是否已有换行
-        // 简单实现：在每个接收到的数据包前加时间戳
-        receivedData.value += getTimeStamp();
-      }
-
-      receivedData.value += newData;
-
-      // 如果文本过长，从头部截断
-      if (receivedData.value.length > MAX_BUFFER_SIZE) {
-        receivedData.value = receivedData.value.slice(receivedData.value.length - MAX_BUFFER_SIZE);
-      }
-
-      // --- 修复结束 ---
-
-      rxCount.value += bytes.length;
-      scrollToBottom();
-    }
+      // 批量处理优化：不再每次都在这里直接操作 heavy 的响应式对象
+      // 而是推入到一个非响应式的队列中，由 requestAnimationFrame 循环处理
+      incomingDataQueue.push(bytes);
   });
+
+  // 启动处理循环
+  startProcessingLoop();
 
   EventsOn("serial-error", (err) => {
     console.error("Connection error:", err);
@@ -307,7 +551,9 @@ onUnmounted(() => {
     clearTimeout(broomAnimationTimer);
     broomAnimationTimer = null;
   }
+  stopProcessingLoop();
 });
+
 
 const base64ToBytes = (base64: string): number[] => {
   const binaryString = window.atob(base64);
@@ -488,7 +734,7 @@ const scrollToBottom = () => {
             </button>
           </div>
 
-          <!-- 颜色选择器网格 -->
+
           <div class="grid grid-cols-2 gap-3">
             <div v-for="(val, key) in theme" :key="key" class="group">
               <label class="text-[10px] font-bold text-[var(--text-sub)] uppercase tracking-wider mb-1.5 block">{{ getThemeLabel(key.toString()) }}</label>
@@ -838,15 +1084,34 @@ const scrollToBottom = () => {
     <div class="flex-1 flex flex-col min-w-0 p-4 gap-4 transition-colors duration-300">
       <div class="flex-1 bg-white/60 rounded-xl shadow-[0_2px_12px_-4px_rgba(0,0,0,0.08)] border border-black/5 flex flex-col overflow-hidden relative backdrop-blur-sm">
         <div class="h-10 px-4 flex items-center justify-between bg-black/[0.02] border-b border-black/5">
-          <div class="flex items-center space-x-2">
-            <span class="text-xs font-bold text-[var(--col-primary)] tracking-wider">RX MONITOR</span>
-            <span class="text-[10px] text-[var(--text-sub)] bg-black/5 px-1.5 py-0.5 rounded-md">{{ rxCount }} Bytes</span>
+          <div class="flex items-center space-x-4">
+            <div class="flex items-center space-x-2">
+              <span class="text-xs font-bold text-[var(--col-primary)] tracking-wider">RX MONITOR</span>
+              <span class="text-[10px] text-[var(--text-sub)] bg-black/5 px-1.5 py-0.5 rounded-md">{{ rxCount }} Bytes</span>
+            </div>
+            
+            <!-- View Mode Switch -->
+            <div class="bg-black/5 p-0.5 rounded-md flex">
+               <button @click="showChart = false" 
+                       class="px-2 py-0.5 text-[10px] font-bold rounded flex items-center gap-1 transition-all"
+                       :class="!showChart ? 'bg-white text-[var(--col-primary)] shadow-sm' : 'text-[var(--text-sub)] hover:text-[var(--text-main)]'">
+                 <span>Text</span>
+               </button>
+               <button @click="showChart = true" 
+                       class="px-2 py-0.5 text-[10px] font-bold rounded flex items-center gap-1 transition-all"
+                       :class="showChart ? 'bg-white text-[var(--col-primary)] shadow-sm' : 'text-[var(--text-sub)] hover:text-[var(--text-main)]'">
+                 <span>Plot</span>
+               </button>
+            </div>
           </div>
           <button @click="clearReceive" title="清空" class="group flex items-center justify-center w-7 h-7 rounded hover:bg-white hover:shadow-sm text-[var(--text-sub)] hover:text-[var(--col-primary)] transition-all">
             <svg class="w-4 h-4 broom-icon" :class="{ 'broom-clicked': isBroomClicked }" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L7.5 16.5"></path><path d="M19.5 4.5L16.5 7.5"></path><path d="M2 22L4.5 19.5"></path><path d="M9.5 12.5C7.5 14.5 6 15 5 16C4 17 3 17 3 17C3 18 4 19C5 20 5 20 5 20C5 20 6 20 7 19C8 18 8.5 16.5 10.5 14.5L18 7"></path></svg>
           </button>
         </div>
-        <textarea ref="logWindowRef" readonly class="flex-1 w-full p-4 font-mono text-sm bg-transparent resize-none outline-none custom-scrollbar leading-relaxed text-[var(--text-main)]" :value="receivedData"></textarea>
+        <div v-if="showChart" class="flex-1 w-full bg-transparent p-2 relative">
+             <v-chart class="chart" :option="chartOption" autoresize />
+        </div>
+        <textarea v-else ref="logWindowRef" readonly class="flex-1 w-full p-4 font-mono text-sm bg-transparent resize-none outline-none custom-scrollbar leading-relaxed text-[var(--text-main)]" :value="receivedData"></textarea>
       </div>
 
       <div class="h-40 bg-white/60 rounded-xl shadow-[0_2px_12px_-4px_rgba(0,0,0,0.08)] border border-black/5 flex flex-col overflow-hidden backdrop-blur-sm">
